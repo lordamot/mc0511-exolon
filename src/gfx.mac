@@ -1,0 +1,417 @@
+; ------------------------------------------------------------------
+; Drawing primitives.
+;
+; Everything is composed in the back buffer (BUF: 192 lines x 32 cell
+; words, low byte = plane 1, high byte = plane 2) and pushed to the
+; screen through @#176640 (plane byte address) / @#176642 (both plane
+; bytes as one word).  A cell is 8 double-wide pixels, so one word per
+; cell per line and one plane byte address per cell.
+;
+; Colour lives in the cell buffer as a slot 1..3: slot 1 lights plane
+; 1, slot 2 plane 2, slot 3 both, and the row's palette element maps
+; the resulting pixel values 2/4/6 to three inks (see zone.mac).
+; Sprites are drawn white (slot 3) over the expanded background, and
+; erased by re-expanding the cells they covered.
+; ------------------------------------------------------------------
+
+; ------------------------------------------------------------------
+; R0 = cell row, R1 = cell column -> R2 = cell record address.
+; Preserves R0, R1.
+CELLADDR:	MOV	R0,R2
+		ASL	R2
+		ASL	R2
+		ASL	R2
+		ASL	R2
+		ASL	R2
+		ASL	R2
+		ASL	R2		; row*128 = row*C.ROW
+		MOV	R1,-(SP)
+		ASL	@SP
+		ASL	@SP		; col*4
+		ADD	(SP)+,R2
+		ADD	#CELLS,R2
+		RETURN
+
+; ------------------------------------------------------------------
+; R0 = cell row, R1 = cell column -> R3 = back buffer address of the
+; cell's top line.  Preserves R0, R1.
+BUFADDR:	MOV	R0,R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3		; row*512 = row*BUF_CELLROW
+		MOV	R1,-(SP)
+		ASL	@SP
+		ADD	(SP)+,R3
+		ADD	#BUF,R3
+		RETURN
+
+; ------------------------------------------------------------------
+; R0 = cell row, R1 = cell column -> R3 = video plane byte address.
+; Preserves R0, R1.
+VIDADDR:	MOV	R0,R3
+		ASL	R3
+		ASL	R3		; row*4
+		MOV	R3,-(SP)
+		ASL	R3
+		ASL	R3		; row*16
+		ADD	(SP)+,R3	; row*20
+		ASL	R3		; a cell row is 8 lines of 80 bytes,
+		ASL	R3		; so row*640 = row*20*32
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ADD	R1,R3
+		ADD	#VCELL0,R3
+		RETURN
+
+; ------------------------------------------------------------------
+; Expand one cell of the cell buffer into the back buffer.
+; R0 = cell row, R1 = cell column.  Preserves R0, R1.
+CELL_DRAW:	MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		CALL	CELLADDR	; R2 = cell record
+		CALL	BUFADDR		; R3 = buffer
+		MOVB	C.SLOT(R2),R0
+		BIC	#177400,R0
+		MOV	@R2,R5		; tile index
+		ASL	R5
+		ASL	R5
+		ASL	R5		; *8
+		ADD	#TILE_GFX,R5
+		MOV	#8.,R2
+		DEC	R0
+		BEQ	CD_P1
+		DEC	R0
+		BEQ	CD_P2
+		DEC	R0
+		BEQ	CD_P3
+CD_CLR:		CLR	(R3)		; empty cell
+		ADD	#BUF_ROW,R3
+		SOB	R2,CD_CLR
+		BR	CD_END
+CD_P1:		MOVB	(R5)+,R1	; plane 1 only
+		BIC	#177400,R1
+		MOV	R1,(R3)
+		ADD	#BUF_ROW,R3
+		SOB	R2,CD_P1
+		BR	CD_END
+CD_P2:		MOVB	(R5)+,R1	; plane 2 only
+		BIC	#177400,R1
+		SWAB	R1
+		MOV	R1,(R3)
+		ADD	#BUF_ROW,R3
+		SOB	R2,CD_P2
+		BR	CD_END
+CD_P3:		MOVB	(R5)+,R1	; both planes
+		BIC	#177400,R1
+		MOV	R1,R4
+		SWAB	R4
+		BIS	R4,R1
+		MOV	R1,(R3)
+		ADD	#BUF_ROW,R3
+		SOB	R2,CD_P3
+CD_END:		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		RETURN
+
+; ------------------------------------------------------------------
+; Clip a rectangle to the screen.  R0 = row, R1 = col, R2 = width,
+; R3 = height; returns the clipped values, Z set when nothing is left.
+CLIPRECT:	TST	R0
+		BGE	1$
+		ADD	R0,R3		; drop the rows above the screen
+		CLR	R0
+1$:		TST	R1
+		BGE	2$
+		ADD	R1,R2
+		CLR	R1
+2$:		MOV	R1,R4
+		ADD	R2,R4
+		CMP	R4,#NCOLS
+		BLOS	3$
+		MOV	#NCOLS,R2
+		SUB	R1,R2
+3$:		MOV	R0,R4
+		ADD	R3,R4
+		CMP	R4,#NROWS
+		BLOS	4$
+		MOV	#NROWS,R3
+		SUB	R0,R3
+4$:		TST	R2
+		BLE	8$
+		TST	R3
+		BLE	8$
+		CMP	R0,#NROWS
+		BHIS	8$
+		CMP	R1,#NCOLS
+		BHIS	8$
+		TST	R2		; clear Z: something to draw
+		RETURN
+8$:		CLR	R2
+		CLR	R3
+		RETURN
+
+; ------------------------------------------------------------------
+; Expand a rectangle of cells: R0 = row, R1 = col, R2 = width,
+; R3 = height.  Clobbers everything.
+CELL_RECT:	CALL	CLIPRECT
+		BEQ	9$
+		MOV	R3,-(SP)	; rows left
+		MOV	R2,-(SP)	; width
+		MOV	R1,-(SP)	; first column
+1$:		MOV	2(SP),R2
+		MOV	@SP,R1
+2$:		MOV	R2,-(SP)
+		CALL	CELL_DRAW
+		MOV	(SP)+,R2
+		INC	R1
+		SOB	R2,2$
+		INC	R0
+		DEC	4(SP)
+		BNE	1$
+		CMP	(SP)+,(SP)+
+		TST	(SP)+
+9$:		RETURN
+
+EXPAND_ALL:	CLR	R0
+		CLR	R1
+		MOV	#NCOLS,R2
+		MOV	#NROWS,R3
+		CALL	CELL_RECT
+		RETURN
+
+; ------------------------------------------------------------------
+; Blit R2 cells of cell row R0 starting at column R1 (8 lines).
+; Clobbers R0..R5.
+BLIT_CELLS:	MOV	R2,-(SP)
+		CALL	BUFADDR		; R3 = buffer
+		MOV	R3,R2
+		CALL	VIDADDR		; R3 = video
+		MOV	(SP)+,R1
+		MOV	#176640,R4
+		MOV	#176642,R5
+		MOV	#8.,R0
+1$:		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		MOV	R3,@R4
+2$:		MOV	(R2)+,@R5
+		INC	@R4
+		SOB	R1,2$
+		MOV	(SP)+,R2
+		MOV	(SP)+,R1
+		ADD	#BUF_ROW,R2
+		ADD	#VLINE,R3
+		SOB	R0,1$
+		RETURN
+
+; ------------------------------------------------------------------
+; Blit a rectangle of cells: R0 = row, R1 = col, R2 = width,
+; R3 = height.  Clobbers everything.
+BLIT_RECT:	CALL	CLIPRECT
+		BEQ	9$
+		MOV	R3,-(SP)
+		MOV	R2,-(SP)
+		MOV	R1,-(SP)
+1$:		MOV	@SP,R1
+		MOV	2(SP),R2
+		MOV	R0,-(SP)
+		CALL	BLIT_CELLS
+		MOV	(SP)+,R0
+		INC	R0
+		DEC	4(SP)
+		BNE	1$
+		CMP	(SP)+,(SP)+
+		TST	(SP)+
+9$:		RETURN
+
+BLIT_FULL:	CLR	R0
+		CLR	R1
+		MOV	#NCOLS,R2
+		MOV	#NROWS,R3
+		CALL	BLIT_RECT
+		RETURN
+
+; ------------------------------------------------------------------
+; Sprite drawing.  Sprites are 1bpp with UKNC bit order (bit 0 is the
+; leftmost pixel), so moving right is a left shift.  X is in 2-pixel
+; units: the low two bits pick one of four sub-cell shifts (0/2/4/6
+; pixels), the rest is the cell column.  A 3-byte-wide frame therefore
+; covers four cell columns.
+;
+; SPR_PLAYER: R0 = frame, R1 = x (2-px units), R2 = y (pixels).
+SPR_PLAYER:	MOV	R0,R4
+		ASL	R4
+		ASL	R4
+		ASL	R4
+		ASL	R4
+		ASL	R4		; frame*32
+		MOV	R4,R3
+		ASL	R3		; frame*64
+		ADD	R3,R4		; frame*96
+		ADD	#PLAYER_SPR,R4
+		MOV	R4,SPRSRC
+		MOV	#32.,R5
+		MOV	#3,TMPA		; source bytes per line
+		BR	SPR_GO
+
+; SPR_SMALL: R0 = frame, R1 = x, R2 = y.  2 bytes x 16 lines.
+SPR_SMALL:	MOV	R0,R4
+		ASL	R4
+		ASL	R4
+		ASL	R4
+		ASL	R4
+		ASL	R4		; frame*32
+		ADD	#SMALL_SPR,R4
+		MOV	R4,SPRSRC
+		MOV	#16.,R5
+		MOV	#2,TMPA
+
+SPR_GO:		MOV	R1,R3		; shift = (x & 3) * 2
+		BIC	#177774,R3
+		ASL	R3
+		MOV	R3,SPRSHIFT
+		ASR	R1
+		ASR	R1		; cell column
+		MOV	#NCOLS,R3	; cells we may touch
+		SUB	R1,R3
+		MOV	TMPA,R4
+		INC	R4		; width in cells = bytes + 1
+		CMP	R3,R4
+		BLOS	1$
+		MOV	R4,R3
+1$:		MOV	R3,TMPB		; cells to write per line
+		BLE	SPR_DONE
+		MOV	R2,R3		; dst = BUF + y*64 + col*2
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		MOV	R1,R4
+		ASL	R4
+		ADD	R4,R3
+		ADD	#BUF,R3
+		MOV	R3,SPRDST
+		MOV	R2,SPRY
+		MOV	SPRSRC,R4
+
+SPR_LINE:	MOV	SPRY,R0		; the row's white-ish slot decides
+		ASR	R0		; which planes the sprite lights
+		ASR	R0
+		ASR	R0
+		CMP	R0,#NROWS
+		BHIS	6$
+		MOVB	WHITESL(R0),R0
+		BIC	#177774,R0
+		ASL	R0
+		MOV	SLOTNOT(R0),SPRNOT
+		BR	7$
+6$:		CLR	SPRNOT
+7$:		INC	SPRY
+		MOV	SPRDST,R3
+		CMP	R3,#BUF
+		BLO	SPR_SKIP
+		CMP	R3,#BUF_END
+		BHIS	SPR_DONE
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOVB	(R4)+,R1
+		BIC	#177400,R1
+		SWAB	R1
+		BIS	R1,R0		; R0 = source bytes 0,1
+		CMP	TMPA,#3
+		BNE	1$
+		MOVB	(R4)+,R1
+		BIC	#177400,R1
+		BR	2$
+1$:		CLR	R1
+2$:		MOV	SPRSHIFT,R2
+		BEQ	4$
+3$:		ASL	R0
+		ROL	R1
+		DEC	R2
+		BNE	3$
+4$:		MOV	TMPB,R2		; cells left to write
+		CALL	SPR_PUT2	; bytes 0,1 -> cells 0,1
+		SUB	#2,R2
+		BLE	5$
+		ADD	#4,R3
+		MOV	R1,R0
+		CALL	SPR_PUT2	; bytes 2,3 -> cells 2,3
+5$:		ADD	#BUF_ROW,SPRDST
+		DEC	R5
+		BNE	SPR_LINE
+SPR_DONE:	RETURN
+
+SLOTNOT:	.WORD	0,177400,377,0	; slot -> planes to suppress
+SPR_SKIP:	ADD	TMPA,R4		; line above the buffer: skip source
+		ADD	#BUF_ROW,SPRDST
+		DEC	R5
+		BNE	SPR_LINE
+		RETURN
+
+; OR the low byte of R0 into the cell word at (R3) and the high byte
+; into (R3+2), in white; R2 = how many of the two cells to write.
+; Preserves R1, R3, R4, R5.
+SPR_PUT2:	MOV	R2,-(SP)	; cells still to write
+		MOV	R0,R2
+		BIC	#177400,R2
+		BEQ	1$
+		MOV	R2,-(SP)
+		SWAB	R2
+		BIS	(SP)+,R2
+		BIC	SPRNOT,R2
+		BIS	R2,(R3)
+1$:		CMP	@SP,#1
+		BLE	2$
+		MOV	R0,R2
+		BIC	#377,R2
+		BEQ	2$
+		SWAB	R2
+		MOV	R2,-(SP)
+		SWAB	R2
+		BIS	(SP)+,R2
+		BIC	SPRNOT,R2
+		BIS	R2,2(R3)
+2$:		MOV	(SP)+,R2
+		RETURN
+
+; ------------------------------------------------------------------
+; Text into the cell buffer: R3 = 0-terminated string (tile codes),
+; R0 = cell row, R1 = cell column, R2 = ink slot.
+PRINT_STR:	MOVB	(R3)+,R4
+		BEQ	9$
+		BIC	#177400,R4
+		MOV	R3,-(SP)
+		MOV	R2,-(SP)
+		MOV	R1,-(SP)
+		MOV	R0,-(SP)
+		CALL	CELL_SET
+		MOV	(SP)+,R0
+		MOV	(SP)+,R1
+		MOV	(SP)+,R2
+		MOV	(SP)+,R3
+		INC	R1
+		BR	PRINT_STR
+9$:		RETURN
+
+; Put tile R4 with slot R2 into cell (R0, R1) of the cell buffer.
+; Clobbers R2, R3, R5.
+CELL_SET:	CMP	R1,#NCOLS
+		BHIS	9$
+		CMP	R0,#NROWS
+		BHIS	9$
+		MOV	R2,R5
+		MOV	R4,R3
+		CALL	CELLADDR	; R2 = cell record
+		MOV	R3,@R2
+		MOVB	R5,C.SLOT(R2)
+		CLRB	C.SOLID(R2)
+9$:		RETURN

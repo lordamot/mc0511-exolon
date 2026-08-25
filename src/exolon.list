@@ -1,0 +1,30 @@
+; Module order for the game build = memory order of the final image.
+; tools/build_exolon.py concatenates these into build/exolon.mac and
+; assembles them with bin/macro11.  boot.mac must stay first (it pads
+; itself to 1000, where main.mac's MAIN_START region begins); nothing
+; may sit between ppu.mac's PP_START and ppu_end.mac's PP_END (that
+; block, music data included, is copied into PPU RAM); gamevars.mac
+; and tail.mac close the layout.
+src/defs.mac
+src/gamevars.mac
+src/boot.mac
+src/main.mac
+src/flow.mac
+src/zone.mac
+src/list.mac
+src/player.mac
+src/shots.mac
+src/enemy.mac
+src/hud.mac
+src/input.mac
+src/gfx.mac
+src/ppucomm.mac
+src/ppu.mac
+build/data_music.mac
+src/ppu_end.mac
+build/data_tiles.mac
+build/data_lists.mac
+build/data_zones.mac
+build/data_sprites.mac
+build/strings.mac
+src/tail.mac

@@ -1,0 +1,34 @@
+; ------------------------------------------------------------------
+; Startup: install the vsync ISR, load the PPU program, then loop
+; between the title screen and a game.
+; ------------------------------------------------------------------
+		.BLKB	2000-.
+
+MAIN_START:	MOV	#STACK_TOP,SP
+		MOV	#INTERR_MAIN,@#100
+		MOV	#TRAP_RTI,@#4	; stray traps: ignore
+		MOV	#TRAP_RTI,@#10
+		CLR	KEYS_DATA
+		CLR	CPU_VSYNC
+		CLR	SND_REQ
+		CLR	SND_MODE
+		CLR	VBLF
+		CLR	KEYS
+		CLR	KEYPREV
+		CALL	PP_MAIN_LOAD	; PPU: line table, colours, sound
+
+MAIN_CYCLE:	CALL	MENU
+		CALL	GAME_RUN
+		BR	MAIN_CYCLE
+
+TRAP_RTI:	RTI
+
+; 50 Hz vsync ISR: frame bits and the free-running counter
+INTERR_MAIN:	MOV	R0,-(SP)
+		ASL	VBLF		; one more frame pending
+		INC	VBLF
+		BIC	#177770,VBLF	; at most 3 pending: a long stall
+					; must not shift bits into the sign
+		INC	TICK
+		MOV	(SP)+,R0
+		RTI

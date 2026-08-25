@@ -1,0 +1,222 @@
+; ------------------------------------------------------------------
+; The scenery display-list interpreter - a direct port of the machine
+; at 0xAF2B in the original (see .claude/docs/re-notes.md).  It paints
+; into the cell buffer instead of a ZX screen: each cell gets a tile
+; index, the ZX ink (+1, so 0 means "cell never drawn") and the
+; collision class.  zone.mac turns the inks into row palette slots
+; afterwards.
+; ------------------------------------------------------------------
+
+LROW:		.WORD	0	; cursor, cell units, wrapped to 8 bits
+LCOL:		.WORD	0
+LINK:		.WORD	8.	; current ink + 1
+LBASE:		.WORD	0	; tile bank base
+LSOLID:		.WORD	1	; collision class written with every cell
+LHIT:		.WORD	0
+LERASE:		.WORD	0	; nonzero: blank the cells instead of drawing
+LSTKP:		.WORD	0	; repeat stack pointer (bytes)
+LSTK:		.BLKW	16.	; 8 x {count, resume address}
+
+; ------------------------------------------------------------------
+; Run the display list at R4.  Clobbers R0..R5.
+LIST_RUN:	MOVB	(R4)+,R0
+		BIC	#177400,R0
+		CMP	R0,#141		; 0..0140: draw a tile
+		BHIS	20$
+		ADD	LBASE,R0
+		CALL	L_PUT
+		JMP	LIST_RUN
+
+20$:		CMP	R0,#220		; 0141..0217: relative cursor move
+		BHIS	30$
+		SUB	#170,R0
+		ADD	R0,LROW
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		ADD	R0,LCOL
+		JMP	L_WRAP
+
+30$:		CMP	R0,#317		; 0220..0316: next row + column delta
+		BHIS	40$
+		SUB	#257,R0
+		ADD	R0,LCOL
+		INC	LROW
+		JMP	L_WRAP
+
+40$:		CMP	R0,#337		; 0317..0336: set ink
+		BHIS	50$
+		SUB	#317,R0
+		INC	R0
+		MOV	R0,LINK
+		JMP	LIST_RUN
+
+50$:		CMP	R0,#337		; 0337: absolute cursor
+		BNE	60$
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOV	R0,LROW
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOV	R0,LCOL
+		JMP	LIST_RUN
+
+60$:		CMP	R0,#340		; 0340: full ZX attribute byte
+		BNE	70$
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOV	R0,R1
+		BIC	#177770,R1	; ink bits
+		BIT	#100,R0		; bright
+		BEQ	61$
+		BIS	#10,R1
+61$:		INC	R1
+		MOV	R1,LINK
+		JMP	LIST_RUN
+
+70$:		CMP	R0,#341		; 0341: start of a repeated block
+		BNE	80$
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOV	LSTKP,R1
+		MOV	R0,LSTK(R1)
+		MOV	R4,LSTK+2(R1)
+		ADD	#4,LSTKP
+		JMP	LIST_RUN
+
+80$:		CMP	R0,#342		; 0342: end of a repeated block
+		BNE	90$
+		MOV	LSTKP,R1
+		SUB	#4,R1
+		DEC	LSTK(R1)
+		BEQ	81$
+		MOV	LSTK+2(R1),R4
+		JMP	LIST_RUN
+81$:		MOV	R1,LSTKP
+		JMP	LIST_RUN
+
+90$:		CMP	R0,#343		; 0343: call a sub-list
+		BNE	100$
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOVB	(R4)+,R1
+		BIC	#177400,R1
+		SWAB	R1
+		BIS	R1,R0
+		ADD	#LISTS,R0
+		MOV	R4,-(SP)	; the sub-list gets a copy of the
+		MOV	LROW,-(SP)	; whole cursor state and cannot
+		MOV	LCOL,-(SP)	; change the caller's
+		MOV	LINK,-(SP)
+		MOV	LBASE,-(SP)
+		MOV	LSOLID,-(SP)
+		MOV	LHIT,-(SP)
+		MOV	LSTKP,-(SP)
+		MOV	R0,R4
+		CALL	LIST_RUN
+		MOV	(SP)+,LSTKP
+		MOV	(SP)+,LHIT
+		MOV	(SP)+,LSOLID
+		MOV	(SP)+,LBASE
+		MOV	(SP)+,LINK
+		MOV	(SP)+,LCOL
+		MOV	(SP)+,LROW
+		MOV	(SP)+,R4
+		JMP	LIST_RUN
+
+100$:		CMP	R0,#344		; 0344: horizontal run
+		BNE	110$
+		MOVB	(R4)+,R5
+		BIC	#177400,R5
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		ADD	LBASE,R0
+		TST	R5
+		BNE	101$
+		JMP	LIST_RUN
+101$:		MOV	R0,-(SP)
+		MOV	R5,-(SP)
+		CALL	L_PUT
+		MOV	(SP)+,R5
+		MOV	(SP)+,R0
+		SOB	R5,101$
+		JMP	LIST_RUN
+
+110$:		CMP	R0,#345		; 0345: vertical run
+		BNE	120$
+		MOVB	(R4)+,R5
+		BIC	#177400,R5
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		ADD	LBASE,R0
+		TST	R5
+		BNE	111$
+		JMP	LIST_RUN
+111$:		MOV	R0,-(SP)
+		MOV	R5,-(SP)
+		MOV	LCOL,-(SP)
+		CALL	L_PUT
+		MOV	(SP)+,LCOL
+		INC	LROW
+		BIC	#177400,LROW
+		MOV	(SP)+,R5
+		MOV	(SP)+,R0
+		SOB	R5,111$
+		JMP	LIST_RUN
+
+120$:		CMP	R0,#346		; 0346: set the tile base
+		BNE	130$
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOVB	(R4)+,R1
+		BIC	#177400,R1
+		SWAB	R1
+		BIS	R1,R0
+		MOV	R0,LBASE
+		JMP	LIST_RUN
+
+130$:		CMP	R0,#350		; 0350: collision class
+		BNE	140$
+		MOVB	(R4)+,R0
+		BIC	#177400,R0
+		MOV	R0,LSOLID
+		JMP	LIST_RUN
+
+140$:		CMP	R0,#351		; 0351/0352: hit flag
+		BNE	150$
+		CLR	LHIT
+		JMP	LIST_RUN
+150$:		CMP	R0,#352
+		BNE	160$
+		MOV	#377,LHIT
+		JMP	LIST_RUN
+160$:		RETURN			; anything else ends the list
+
+L_WRAP:		BIC	#177400,LROW
+		BIC	#177400,LCOL
+		JMP	LIST_RUN
+
+; ------------------------------------------------------------------
+; Store tile R0 at the cursor and step one cell to the right.  Cells
+; whose column has bit 5 set are dropped, exactly as the original's
+; plotter does (`BIT 5,E; RET NZ`) - that is how scenery hangs off the
+; screen edges.  Clobbers R1, R2, R3.
+L_PUT:		BIT	#40,LCOL
+		BNE	9$
+		CMP	LROW,#NROWS
+		BHIS	9$
+		MOV	R0,R3
+		MOV	LROW,R0
+		MOV	LCOL,R1
+		CALL	CELLADDR	; R2 = cell record
+		TST	LERASE
+		BNE	1$
+		MOV	R3,@R2
+		MOVB	LINK,C.SLOT(R2)
+		MOVB	LSOLID,C.SOLID(R2)
+		BR	9$
+1$:		CLR	@R2		; erase mode: the cell goes empty
+		CLRB	C.SLOT(R2)
+		CLRB	C.SOLID(R2)
+9$:		INC	LCOL
+		BIC	#177400,LCOL
+		RETURN

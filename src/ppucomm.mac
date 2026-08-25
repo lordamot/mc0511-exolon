@@ -1,0 +1,63 @@
+; ------------------------------------------------------------------
+; CPU side of the PPU link (from ../mc0511-openit): load the PPU
+; program over channel K2 and send K1 commands.
+; ------------------------------------------------------------------
+
+; load PP_START..PP_END into PPU RAM and start it
+PP_MAIN_LOAD:	MOVB	#1,K2REQ	; request: allocate PPU memory
+		MOV	#<PP_END-PP_START>/2,K2ADDR2
+		CALL	K2SEND
+		MOV	K2ADDR1,PPBLK	; block address in PPU RAM
+		MOV	K2ADDR2,PPBLKSZ
+		MOVB	#20,K2REQ	; transfer CPU RAM -> PPU RAM
+		MOV	PPBLK,K2ADDR1
+		MOV	#PP_START,K2ADDR2
+		MOV	PPBLKSZ,K2ADDR3
+		CALL	K2SEND
+		MOVB	#30,K2REQ	; start the program
+		MOV	PPBLK,K2ADDR1
+		CLR	PP_BUSY
+		CALL	K2SEND
+1$:		TST	PP_BUSY		; wait for PP_START to signal
+		BEQ	1$
+		RETURN
+
+; send command R0 to the PPU program (via channel K1) and wait
+SEND_PP_COMM:	TST	PP_BUSY
+		BEQ	SEND_PP_COMM	; wait until the PPU is free
+		CLR	PP_BUSY
+1$:		TSTB	@#176664	; K1 ready to transmit?
+		BPL	1$
+		MOVB	R0,@#176666	; command code
+2$:		TST	PP_BUSY		; wait for completion
+		BEQ	2$
+		RETURN
+
+K2SEND:		MOV	#K2BLK,R1
+		MOV	#5,R3
+		BR	2$
+1$:		MOVB	(R1)+,@#176676
+2$:		TSTB	@#176674
+		BPL	2$
+		SOB	R3,1$
+		RETURN
+
+PP_BUSY:	.WORD	0		; 0 = PPU busy
+PPBLK:		.BLKW	1		; allocated PPU RAM block
+PPBLKSZ:	.BLKW	1
+K2ERR:		.BLKB	1		; K2 request block
+K2REQ:		.BLKB	1
+K2DEV:		.WORD	32		; device: PPU memory
+K2ADDR1:	.BLKW	1
+K2ADDR2:	.BLKW	1
+K2ADDR3:	.BLKW	1
+K2BLK:		.WORD	K2ERR,401
+
+; palette + mode words read by the PPU (COMMAND_4 / COMMAND_0):
+; plane value 0 = black, 2 = green, 4 = red, 6 = white
+COLORWORD1:	.WORD	135220	; values 0..3: black, blue, green, cyan
+COLORWORD2:	.WORD	177734	; values 4..7: red, magenta, white, white
+COLORWORD3:	.WORD	135220	; same for the lower field
+COLORWORD4:	.WORD	177734
+CPU_RGBPAL:	.WORD	27	; display mode: 320, normal brightness
+CPU_MODE_DN:	.WORD	27

@@ -1,0 +1,158 @@
+; ------------------------------------------------------------------
+; The status panel, on cell rows 22 and 23 as in the original:
+; AMMO / GRENADES / POINTS / LIVES / ZONES.  Characters are tiles (the
+; glyph bank holds the font at tile index = ASCII code), so the HUD
+; goes through the same cell buffer as everything else.  Its two rows
+; keep a fixed palette; ROW_PALETTES leaves them alone.
+; ------------------------------------------------------------------
+
+HUD_ROW	= 22.
+HUD_VAL	= 23.
+
+; column of each field's label / value
+HC_AMMO	= 0
+HC_GREN	= 5
+HC_PTS	= 14.
+HC_LIVES = 21.
+HC_ZONE	= 27.
+
+; fixed HUD palette: slot 1 cyan, slot 2 yellow, slot 3 white
+HUDPAL:		.BYTE	13.,14.,15.
+		.EVEN
+
+HUD_INIT:	MOV	#HUD_ROW,R0	; the labels
+		MOV	#HC_AMMO,R1
+		MOV	#1,R2
+		MOV	#S_AMMO,R3
+		CALL	PRINT_STR
+		MOV	#HUD_ROW,R0
+		MOV	#HC_GREN,R1
+		MOV	#2,R2
+		MOV	#S_GREN,R3
+		CALL	PRINT_STR
+		MOV	#HUD_ROW,R0
+		MOV	#HC_PTS,R1
+		MOV	#1,R2
+		MOV	#S_POINTS,R3
+		CALL	PRINT_STR
+		MOV	#HUD_ROW,R0
+		MOV	#HC_LIVES,R1
+		MOV	#3,R2
+		MOV	#S_LIVES,R3
+		CALL	PRINT_STR
+		MOV	#HUD_ROW,R0
+		MOV	#HC_ZONE,R1
+		MOV	#2,R2
+		MOV	#S_ZONES,R3
+		CALL	PRINT_STR
+		MOV	#HUDPAL,R0	; fixed palette for both HUD rows
+		MOV	#HUD_ROW,R1
+1$:		MOVB	@R0,ROWPAL3
+		MOVB	1(R0),ROWPAL3+1
+		MOVB	2(R0),ROWPAL3+2
+		MOV	R1,-(SP)
+		MOV	R0,-(SP)
+		MOV	R1,R0
+		CALL	ROW_PALWORDS
+		MOV	(SP)+,R0
+		MOV	(SP)+,R1
+		INC	R1
+		CMP	R1,#NROWS
+		BLO	1$
+		MOVB	#3,WHITESL+22.
+		MOVB	#3,WHITESL+23.
+		MOV	#1,HUDDIRTY
+		CALL	HUD_VALUES
+		RETURN
+
+; ------------------------------------------------------------------
+; Redraw the numbers when something changed, and blit the two rows.
+HUD_UPD:	TST	HUDDIRTY
+		BEQ	9$
+		CLR	HUDDIRTY
+		CALL	HUD_VALUES
+		MOV	#HUD_VAL,R0
+		CLR	R1
+		MOV	#NCOLS,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#HUD_VAL,R0
+		CLR	R1
+		MOV	#NCOLS,R2
+		MOV	#1,R3
+		CALL	MARK_RECT
+9$:		RETURN
+
+HUD_VALUES:	MOV	AMMO,R4		; ammo, two digits
+		MOV	#HC_AMMO+1,R1
+		MOV	#1,R2
+		MOV	#2,R5
+		CALL	HUD_NUM
+		MOV	GRENADES,R4	; grenades, two digits
+		MOV	#HC_GREN+3,R1
+		MOV	#2,R2
+		MOV	#2,R5
+		CALL	HUD_NUM
+		MOV	#HUD_VAL,R0	; score, six digits
+		MOV	#HC_PTS+1,R1
+		MOV	#1,R2
+		MOV	#SCORE,R3
+		MOV	#6,R5
+1$:		MOVB	(R3)+,R4
+		BIC	#177400,R4
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		MOV	R3,-(SP)
+		MOV	R5,-(SP)
+		CALL	CELL_SET
+		MOV	(SP)+,R5
+		MOV	(SP)+,R3
+		MOV	(SP)+,R2
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		INC	R1
+		SOB	R5,1$
+		MOV	LIVES,R4	; lives, one digit
+		MOV	#HC_LIVES+2,R1
+		MOV	#3,R2
+		MOV	#1,R5
+		CALL	HUD_NUM
+		MOV	ZONE,R4		; zone, three digits
+		MOV	#HC_ZONE+1,R1
+		MOV	#2,R2
+		MOV	#3,R5
+		CALL	HUD_NUM
+		RETURN
+
+; ------------------------------------------------------------------
+; Print R4 as R5 decimal digits, right aligned, starting at column R1,
+; with ink slot R2, on the value row.
+HN_VAL:		.WORD	0
+HN_COL:		.WORD	0
+HN_INK:		.WORD	0
+HN_CNT:		.WORD	0
+HUD_NUM:	MOV	R4,HN_VAL
+		MOV	R2,HN_INK
+		MOV	R5,HN_CNT
+		ADD	R5,R1
+		DEC	R1
+		MOV	R1,HN_COL
+1$:		MOV	HN_VAL,R0	; divide by ten the slow way
+		CLR	R1
+2$:		SUB	#10.,R0
+		BLT	3$
+		INC	R1
+		BR	2$
+3$:		ADD	#10.,R0
+		MOV	R1,HN_VAL
+		ADD	#60,R0		; ASCII digit = tile index
+		MOV	R0,R4
+		MOV	#HUD_VAL,R0
+		MOV	HN_COL,R1
+		MOV	HN_INK,R2
+		CALL	CELL_SET
+		DEC	HN_COL
+		DEC	HN_CNT
+		BNE	1$
+		RETURN

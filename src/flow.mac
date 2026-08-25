@@ -1,0 +1,309 @@
+; ------------------------------------------------------------------
+; Score, the dirty-rectangle list, the title/menu screen and the game
+; cycle.
+; ------------------------------------------------------------------
+
+; ---- dirty rectangles --------------------------------------------
+; Everything that draws into the back buffer marks the cells it
+; touched; BLIT_MARKS pushes them to the screen once per frame.  A
+; full-screen redraw is cheaper than a long list, so the list simply
+; saturates.
+NMARK	= 64.
+MARKN:		.WORD	0
+MARKS:		.BLKW	4*NMARK
+
+MARKS_CLEAR:	CLR	MARKN
+		RETURN
+
+; R0 = row, R1 = col, R2 = width, R3 = height
+MARK_RECT:	CMP	MARKN,#NMARK
+		BHIS	9$
+		MOV	MARKN,R4
+		ASL	R4
+		ASL	R4
+		ASL	R4
+		ADD	#MARKS,R4
+		MOV	R0,(R4)+
+		MOV	R1,(R4)+
+		MOV	R2,(R4)+
+		MOV	R3,(R4)+
+		INC	MARKN
+9$:		RETURN
+
+BLIT_MARKS:	TST	MARKN
+		BEQ	9$
+		MOV	#MARKS,R5
+		MOV	MARKN,R4
+1$:		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+		MOV	(R5)+,R0
+		MOV	(R5)+,R1
+		MOV	(R5)+,R2
+		MOV	(R5)+,R3
+		CALL	BLIT_RECT
+		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+		ADD	#8.,R5
+		SOB	R4,1$
+		CLR	MARKN
+9$:		RETURN
+
+; ---- score -------------------------------------------------------
+; Six ASCII digits, added the way the original does it.
+SCORE_CLEAR:	MOV	#SCORE,R0
+		MOV	#6,R1
+1$:		MOVB	#60,(R0)+
+		SOB	R1,1$
+		RETURN
+
+; add the six-digit decimal amount at R3 (ASCII) to SCORE
+SCORE_ADD:	MOV	#SCORE+5,R0
+		ADD	#5,R3
+		MOV	#6,R1
+		CLR	R2		; carry
+1$:		MOVB	@R0,R4
+		BIC	#177400,R4
+		MOVB	@R3,R5
+		BIC	#177400,R5
+		ADD	R5,R4
+		SUB	#60,R4
+		ADD	R2,R4
+		CLR	R2
+		CMP	R4,#71
+		BLOS	2$
+		SUB	#12.,R4
+		MOV	#1,R2
+2$:		MOVB	R4,@R0
+		DEC	R0
+		DEC	R3
+		SOB	R1,1$
+		MOV	#1,HUDDIRTY
+		RETURN
+
+SCORE_HIT:	MOV	#SC_HIT,R3
+		CALL	SCORE_ADD
+		RETURN
+
+SCORE_ZONE:	MOV	#SC_ZONE,R3
+		CALL	SCORE_ADD
+		RETURN
+
+SC_HIT:		.ASCII	/000030/
+SC_ZONE:	.ASCII	/000100/
+		.EVEN
+
+; ---- game cycle --------------------------------------------------
+GAMEOVER:	.WORD	0
+
+GAME_START:	CLR	ZONE
+		MOV	#7,LIVES
+		MOV	#99.,AMMO
+		MOV	#10.,GRENADES
+		CLR	PSUIT
+		CLR	GAMEOVER
+		CALL	SCORE_CLEAR
+		MOV	#8.,PXENT
+		MOV	#96.,PYENT
+		CALL	PLAYER_INIT
+		MOV	#1,ZONELOAD
+		RETURN
+
+GAME_RUN:	CALL	GAME_START
+1$:		CALL	VSYNC
+		CALL	INPUT_READ
+		MOV	#K_STOP,R0
+		CALL	KEY_HELD
+		BNE	9$
+		MOV	#K_PAUSE,R0
+		CALL	KEY_EDGE
+		BEQ	3$
+		CALL	PAUSE
+3$:		TST	ZONELOAD
+		BEQ	2$
+		CALL	ZONE_LOAD
+		CALL	MARKS_CLEAR
+2$:		CALL	MARKS_CLEAR
+		CALL	ENTS_ERASE
+		CALL	PL_ERASE
+		CALL	PLAYER_UPD
+		CALL	SHOOT_BOLT
+		CALL	THROW_GREN
+		CALL	ENEMY_UPD
+		CALL	ENTS_UPD
+		CALL	PL_SHOW
+		CALL	HUD_UPD
+		CALL	BLIT_MARKS
+		INC	FRAMECNT
+		TST	GAMEOVER
+		BEQ	1$
+		CALL	SHOW_GAMEOVER
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; A display list stores the ZX ink (+1) in every cell it paints; the
+; zone loader normally turns those into palette slots, but the title
+; screen paints its logo afterwards, so convert them here.  Cells the
+; text routines wrote already hold a slot (1..3) and are left alone.
+TITLE_INKS:	MOVB	#13.,ROWPAL3
+		MOVB	#14.,ROWPAL3+1
+		MOVB	#15.,ROWPAL3+2
+		CALL	INK_MAP
+		MOV	#CELLS,R0
+		MOV	#15.*NCOLS,R1
+1$:		MOVB	C.SLOT(R0),R2
+		BIC	#177400,R2
+		CMP	R2,#3
+		BLOS	2$
+		DEC	R2
+		MOVB	ROWINK(R2),R2
+		MOVB	R2,C.SLOT(R0)
+2$:		ADD	#C.SIZE,R0
+		SOB	R1,1$
+		RETURN
+
+; ------------------------------------------------------------------
+; АП2 holds the game still until it is pressed again.
+PAUSE:		MOV	#11.,R0		; keep the cells the message covers
+		MOV	#13.,R1
+		CALL	CELLADDR
+		MOV	#PAUSAVE,R3
+		MOV	#12.,R4
+5$:		MOV	(R2)+,(R3)+
+		SOB	R4,5$
+		MOV	#11.,R0
+		MOV	#13.,R1
+		MOV	#3,R2
+		MOV	#S_PAUSED,R3
+		CALL	PRINT_STR
+		MOV	#11.,R0
+		MOV	#13.,R1
+		MOV	#6,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#11.,R0
+		MOV	#13.,R1
+		MOV	#6,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
+1$:		CALL	VSYNC
+		CALL	INPUT_READ
+		MOV	#K_PAUSE,R0
+		CALL	KEY_EDGE
+		BEQ	1$
+		MOV	#11.,R0		; put the cells back
+		MOV	#13.,R1
+		CALL	CELLADDR
+		MOV	#PAUSAVE,R3
+		MOV	#12.,R4
+2$:		MOV	(R3)+,(R2)+
+		SOB	R4,2$
+		MOV	#11.,R0
+		MOV	#13.,R1
+		MOV	#6,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#11.,R0
+		MOV	#13.,R1
+		MOV	#6,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
+		RETURN
+
+PAUSAVE:	.BLKW	12.
+
+; ------------------------------------------------------------------
+; Wait for the next 50 Hz tick (the ISR shifts a bit into VBLF).
+VSYNC:		TST	VBLF
+		BEQ	VSYNC
+		ASR	VBLF
+		RETURN
+
+; ------------------------------------------------------------------
+SHOW_GAMEOVER:	MOV	#10.,R0
+		MOV	#11.,R1
+		MOV	#3,R2
+		MOV	#S_GAMEOVER,R3
+		CALL	PRINT_STR
+		MOV	#10.,R0
+		MOV	#11.,R1
+		MOV	#10.,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#10.,R0
+		MOV	#11.,R1
+		MOV	#10.,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
+		MOV	#150.,R5
+1$:		CALL	VSYNC
+		SOB	R5,1$
+		RETURN
+
+; ------------------------------------------------------------------
+; The title screen: the game's own logo zone plus the menu text.
+MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
+		CLR	PX
+		MOV	#128.,PY
+		CALL	ENTS_CLEAR
+		CALL	ZONE_LOAD
+		MOV	#CELLS+<22.*C.ROW>,R0	; no status panel on the title
+		MOV	#NCOLS*2,R1
+1$:		CLR	(R0)+
+		CLR	(R0)+
+		SOB	R1,1$
+		MOV	#CELLS,R0		; clear the sky the title sits on
+		MOV	#15.*NCOLS,R1
+3$:		CLR	(R0)+
+		CLR	(R0)+
+		SOB	R1,3$
+		CLR	R5			; and give those rows their own
+4$:		MOVB	#13.,ROWPAL3		; palette: cyan, yellow, white
+		MOVB	#14.,ROWPAL3+1
+		MOVB	#15.,ROWPAL3+2
+		MOV	R5,R0
+		CALL	ROW_PALWORDS
+		MOVB	#3,WHITESL(R5)
+		INC	R5
+		CMP	R5,#15.
+		BLO	4$
+		MOV	#2,R0
+		CALL	SEND_PP_COMM
+		MOV	#L_LOGO,R0		; the original's own EXOLON logo
+		CLR	R1
+		MOV	#8.,R2
+		CALL	RUN_LIST
+		CALL	TITLE_INKS
+		MOV	#8.,R0
+		MOV	#7,R1
+		MOV	#2,R2
+		MOV	#S_AUTHOR,R3
+		CALL	PRINT_STR
+		MOV	#10.,R0
+		MOV	#11.,R1
+		MOV	#1,R2
+		MOV	#S_PORT,R3
+		CALL	PRINT_STR
+		MOV	#12.,R0
+		MOV	#10.,R1
+		MOV	#3,R2
+		MOV	#S_START,R3
+		CALL	PRINT_STR
+		MOV	#14.,R0
+		MOV	#8.,R1
+		MOV	#2,R2
+		MOV	#S_COPY,R3
+		CALL	PRINT_STR
+		CLR	R0
+		CLR	R1
+		MOV	#NCOLS,R2
+		MOV	#NROWS,R3
+		CALL	CELL_RECT
+		CALL	BLIT_FULL
+		MOV	#1,SND_MODE	; the title tune plays in the PPU
+2$:		CALL	VSYNC
+		CALL	INPUT_READ
+		MOV	#K_ENTER!K_FIRE,R0
+		CALL	KEY_EDGE
+		BEQ	2$
+		CLR	SND_MODE
+		RETURN

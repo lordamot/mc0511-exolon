@@ -1,0 +1,582 @@
+; ------------------------------------------------------------------
+; Everything that flies: the player's laser bolts, grenades, enemy
+; missiles and the explosion animation.  One record layout for all of
+; them (see E.* in defs.mac); the kind selects the update rule.
+; ------------------------------------------------------------------
+
+EK_BOLT	= 1		; player bolt: straight, 4 px a frame
+EK_SHOT	= 2		; enemy missile: straight, 2 px a frame
+EK_GREN	= 3		; grenade: thrown in an arc, blows scenery up
+EK_BOOM	= 4		; explosion animation
+
+SPR_BOLT = 45.		; frames added to src/res/sprites/small.txt
+SPR_GREN = 46.
+SPR_MISL = 13.		; missile from the original's 16x16 set
+SPR_BOOM = 0		; explosion runs frames 0..9
+
+ENTS_CLEAR:	MOV	#ENTS,R0
+		MOV	#E.SIZE*NENT,R1
+1$:		CLRB	(R0)+
+		SOB	R1,1$
+		RETURN
+
+; ------------------------------------------------------------------
+; Find a free slot -> R3, Z clear on success.
+ENT_NEW:	MOV	#ENTS,R3
+		MOV	#NENT,R0
+1$:		TSTB	E.STATE(R3)
+		BEQ	2$
+		ADD	#E.SIZE,R3
+		SOB	R0,1$
+		CLR	R0		; nothing free
+		RETURN
+2$:		MOV	#1,R0
+		RETURN
+
+; ------------------------------------------------------------------
+; Spawn: R0 = kind, R1 = x, R2 = y, R4 = signed x step.
+ENT_SPAWN:	MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		MOV	R4,-(SP)
+		CALL	ENT_NEW
+		BEQ	9$
+		MOV	(SP)+,R4
+		MOV	(SP)+,R2
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOVB	#1,E.STATE(R3)
+		MOVB	R1,E.X(R3)
+		MOVB	R2,E.Y(R3)
+		MOVB	R0,E.KIND(R3)
+		MOVB	R4,E.T1(R3)
+		CLRB	E.T2(R3)
+		RETURN
+9$:		ADD	#8.,SP
+		RETURN
+
+; ------------------------------------------------------------------
+; The player fires.
+SHOOT_BOLT:	TST	PDEAD
+		BNE	9$
+		TST	AMMO
+		BEQ	9$
+		MOV	#K_FIRE,R0
+		CALL	KEY_EDGE
+		BEQ	9$
+		DEC	AMMO
+		MOV	#1,HUDDIRTY
+		MOV	#SFX_SHOT,SND_REQ
+		MOV	PX,R1
+		MOV	PY,R2
+		ADD	#12.,R2		; muzzle height
+		TST	PDUCK
+		BEQ	1$
+		ADD	#7,R2
+1$:		MOV	#3,R4
+		TST	PFACE
+		BGT	2$
+		MOV	#-3,R4
+		SUB	#2,R1
+		BR	3$
+2$:		ADD	#10.,R1
+3$:		MOV	#EK_BOLT,R0
+		CALL	ENT_SPAWN
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; The player throws a grenade.
+THROW_GREN:	TST	PDEAD
+		BNE	9$
+		TST	GRENADES
+		BEQ	9$
+		MOV	#K_GREN,R0
+		CALL	KEY_EDGE
+		BEQ	9$
+		DEC	GRENADES
+		MOV	#1,HUDDIRTY
+		MOV	#SFX_SHOT,SND_REQ
+		MOV	PX,R1
+		MOV	PY,R2
+		ADD	#8.,R2
+		MOV	#2,R4
+		TST	PFACE
+		BGT	1$
+		MOV	#-2,R4
+		BR	2$
+1$:		ADD	#10.,R1
+2$:		MOV	#EK_GREN,R0
+		CALL	ENT_SPAWN
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; Update and draw every live entity.
+ENTS_UPD:	MOV	#ENTS,R5
+		MOV	#NENT,R4
+1$:		TSTB	E.STATE(R5)
+		BEQ	2$
+		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+		CALL	ENT_ONE
+		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+2$:		ADD	#E.SIZE,R5
+		SOB	R4,1$
+		RETURN
+
+; one entity: R5 = record (also kept in ECUR, because the cell and
+; blit helpers clobber every register)
+ECUR:		.WORD	0
+ENT_ONE:	MOV	R5,ECUR
+		MOVB	E.KIND(R5),R0
+		BIC	#177400,R0
+		CMP	R0,#EK_BOOM
+		BEQ	EN_BOOM
+		CMP	R0,#EK_GREN
+		BEQ	EN_GREN
+		CMP	R0,#EK_SHOT
+		BEQ	EN_SHOT
+
+; ---- player bolt -------------------------------------------------
+EN_BOLT:	CALL	ENT_STEPX
+		BNE	90$
+		JMP	EN_KILL
+90$:
+		CALL	ENT_CELLCLASS
+		TST	R2
+		BEQ	1$
+		CALL	OBJ_AT_BOLT	; part of a live object?
+		BEQ	91$
+		JMP	EN_HITOBJ
+91$:		JMP	EN_KILL		; plain scenery just stops the bolt
+		CALL	BOLT_VS_SHOT
+		BEQ	1$
+		JMP	EN_HITOBJ
+1$:		INCB	E.T2(R5)
+		CMPB	E.T2(R5),#40.
+		BLO	92$
+		JMP	EN_KILL
+92$:
+		MOV	#SPR_BOLT,R0
+		JMP	ENT_SHOW
+
+; ---- enemy missile -----------------------------------------------
+EN_SHOT:	CALL	ENT_STEPX
+		BNE	93$
+		JMP	EN_KILL
+93$:
+		CALL	ENT_CELLCLASS
+		TST	R2
+		BEQ	1$
+		CMP	R2,#2
+		BHI	94$
+		JMP	EN_KILL
+94$:
+1$:		CALL	ENT_HITPLAYER
+		BEQ	2$
+		CALL	PLAYER_KILL
+		JMP	EN_KILL
+2$:		INCB	E.T2(R5)
+		CMPB	E.T2(R5),#80.
+		BLO	95$
+		JMP	EN_KILL
+95$:
+		MOV	#SPR_MISL,R0
+		JMP	ENT_SHOW
+
+; ---- grenade -----------------------------------------------------
+EN_GREN:	CALL	ENT_STEPX
+		BNE	96$
+		JMP	EN_BLOW
+96$:
+		INCB	E.T2(R5)
+		MOVB	E.T2(R5),R0	; a simple arc: up, then down
+		BIC	#177400,R0
+		CMP	R0,#12.
+		BHI	1$
+		MOVB	E.Y(R5),R1
+		BIC	#177400,R1
+		SUB	#2,R1
+		BGE	11$
+		CLR	R1
+11$:		MOVB	R1,E.Y(R5)
+		BR	2$
+1$:		MOVB	E.Y(R5),R1
+		BIC	#177400,R1
+		ADD	#2,R1
+		CMP	R1,#188.
+		BLO	12$
+		JMP	EN_BLOW
+12$:		MOVB	R1,E.Y(R5)
+2$:		CALL	ENT_CELLCLASS
+		TST	R2
+		BEQ	97$
+		JMP	EN_BLOW
+97$:
+		MOV	#SPR_GREN,R0
+		JMP	ENT_SHOW
+
+EN_BLOW:	CALL	GREN_BLAST
+		JMP	EN_BOOMSTART
+
+; ---- explosion ---------------------------------------------------
+EN_BOOM:	INCB	E.T2(R5)
+		MOVB	E.T2(R5),R0
+		BIC	#177400,R0
+		ASR	R0
+		CMP	R0,#10.
+		BLO	98$
+		JMP	EN_KILL
+98$:
+		MOV	R0,-(SP)
+		CALL	ENT_HITPLAYER
+		BEQ	1$
+		CALL	PLAYER_KILL
+1$:		MOV	(SP)+,R0
+		MOV	ECUR,R5
+		JMP	ENT_SHOW
+
+EN_BOOMSTART:	MOV	ECUR,R5
+		MOVB	#EK_BOOM,E.KIND(R5)
+		CLRB	E.T2(R5)
+		MOV	#SFX_BOOM,SND_REQ
+		CLR	R0
+		JMP	ENT_SHOW
+
+EN_KILL:	MOV	ECUR,R3		; it may already be on screen this
+		CALL	ENT_WIPE	; frame, so put the background back
+		MOV	ECUR,R5
+		CLRB	E.STATE(R5)
+		RETURN
+
+; a bolt hit a live object: score it and blow it up
+EN_HITOBJ:	CALL	SCORE_HIT
+		MOV	ECUR,R5
+		JMP	EN_BOOMSTART
+
+; ------------------------------------------------------------------
+; Is the bolt at R5 inside the box of a live scenery object?  If so
+; the object is wiped out (its cells go, so the way is clear) and Z is
+; returned clear.  Every object with a bounding box is a target - that
+; is how the original marks what can be shot - except the two pickup
+; canisters, which are there to be walked into.
+OBJ_AT_BOLT:	MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ADD	#4,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0			; cell row
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ADD	#2,R1
+		ASR	R1
+		ASR	R1			; cell column
+		MOV	#OBJLIST,R3
+		MOV	NLIVE,R4
+		BEQ	8$
+1$:		MOVB	O.OBJ(R3),R2
+		BIC	#177400,R2
+		BIT	#200,R2			; already destroyed
+		BNE	5$
+		CMP	R2,#OB_AMMO		; canisters are pickups, not
+		BEQ	5$			; targets
+		CMP	R2,#OB_AMMO2
+		BEQ	5$
+		MOVB	O.X0(R3),R2
+		CMP	R1,R2
+		BLT	5$
+		MOVB	O.X1(R3),R2
+		CMP	R1,R2
+		BGT	5$
+		MOVB	O.Y0(R3),R2
+		CMP	R0,R2
+		BLT	5$
+		MOVB	O.Y1(R3),R2
+		CMP	R0,R2
+		BGT	5$
+		CALL	OBJ_CLEAR
+		MOV	ECUR,R5
+		MOV	#1,R0
+		RETURN
+5$:		ADD	#O.SIZE,R3
+		SOB	R4,1$
+8$:		MOV	ECUR,R5
+		CLR	R0
+		RETURN
+
+; Remove the live object at R3: its display list is replayed in erase
+; mode, then the rectangle it stood in is redrawn and blitted.
+OBJ_CLEAR:	MOVB	O.Y0(R3),R0
+		MOVB	O.X0(R3),R1
+		MOVB	O.Y1(R3),R2
+		SUB	R0,R2
+		INC	R2
+		MOVB	O.X1(R3),R4
+		SUB	R1,R4
+		INC	R4
+		MOV	R0,OCROW
+		MOV	R1,OCCOL
+		MOV	R2,OCH
+		MOV	R4,OCW
+		CALL	OBJ_ERASE
+		MOV	OCROW,R0
+		MOV	OCCOL,R1
+		MOV	OCW,R2
+		MOV	OCH,R3
+		CALL	CELL_RECT
+		MOV	OCROW,R0
+		MOV	OCCOL,R1
+		MOV	OCW,R2
+		MOV	OCH,R3
+		CALL	MARK_RECT
+		RETURN
+
+OCROW:		.WORD	0
+OCCOL:		.WORD	0
+OCW:		.WORD	0
+OCH:		.WORD	0
+
+; ------------------------------------------------------------------
+; Put the background back where the entity at R3 is drawn, and mark
+; the rectangle.  Used when something is removed after it has already
+; been drawn this frame.  Preserves R3.
+ENT_WIPE:	MOV	R3,-(SP)
+		MOV	R4,-(SP)
+		MOVB	E.Y(R3),R0
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	E.X(R3),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	#4,R2
+		MOV	#3,R3
+		CALL	CELL_RECT
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	#4,R2
+		MOV	#3,R3
+		CALL	MARK_RECT
+		MOV	(SP)+,R4
+		MOV	(SP)+,R3
+		RETURN
+
+; ------------------------------------------------------------------
+; Does the bolt at R5 overlap an enemy missile?  Z clear = yes, and
+; the missile is removed.
+BOLT_VS_SHOT:	MOV	#ENTS,R3
+		MOV	#NENT,R4
+1$:		TSTB	E.STATE(R3)
+		BEQ	3$
+		CMPB	E.KIND(R3),#EK_SHOT
+		BNE	3$
+		MOVB	E.X(R3),R0
+		BIC	#177400,R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		SUB	R1,R0
+		CMP	R0,#-3
+		BLT	3$
+		CMP	R0,#3
+		BGT	3$
+		MOVB	E.Y(R3),R0
+		BIC	#177400,R0
+		MOVB	E.Y(R5),R1
+		BIC	#177400,R1
+		SUB	R1,R0
+		CMP	R0,#-14.
+		BLT	3$
+		CMP	R0,#14.
+		BGT	3$
+		CALL	ENT_WIPE	; it may already be on screen
+		CLRB	E.STATE(R3)
+		MOV	ECUR,R5
+		MOV	#1,R0		; Z clear: the bolt scored
+		RETURN
+3$:		ADD	#E.SIZE,R3
+		SOB	R4,1$
+		MOV	ECUR,R5
+		CLR	R0
+		RETURN
+
+; ------------------------------------------------------------------
+; Draw the entity with 16x16 sprite frame R0 and mark its rectangle.
+ENT_SHOW:	MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		CALL	SPR_SMALL
+		MOV	(SP)+,R0	; y
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOV	(SP)+,R1	; x
+		ASR	R1
+		ASR	R1
+		MOV	#4,R2
+		MOV	#3,R3
+		CALL	MARK_RECT
+		RETURN
+
+; ------------------------------------------------------------------
+; Restore the background under every live entity (called before the
+; updates, so the erase always matches last frame's position).
+ENTS_ERASE:	MOV	#ENTS,R5
+		MOV	#NENT,R4
+1$:		TSTB	E.STATE(R5)
+		BEQ	2$
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		MOV	#4,R2
+		MOV	#3,R3
+		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		CALL	CELL_RECT
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	#4,R2
+		MOV	#3,R3
+		CALL	MARK_RECT
+		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+2$:		ADD	#E.SIZE,R5
+		SOB	R4,1$
+		RETURN
+
+; ------------------------------------------------------------------
+; Move the entity by its x step; Z set when it left the screen.
+ENT_STEPX:	MOVB	E.T1(R5),R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ADD	R0,R1
+		TST	R1
+		BLT	9$
+		CMP	R1,#126.
+		BHIS	9$
+		MOVB	R1,E.X(R5)
+		MOV	#1,R0		; Z clear: still on screen
+		RETURN
+9$:		CLR	R0
+		RETURN
+
+; Collision class of the cell the entity is in -> R2.
+ENT_CELLCLASS:	MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ADD	#4,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ADD	#2,R1
+		ASR	R1
+		ASR	R1
+		CLR	R2
+		CMP	R0,#NROWS
+		BHIS	9$
+		CMP	R1,#NCOLS
+		BHIS	9$
+		CALL	CELLADDR
+		MOVB	C.SOLID(R2),R3
+		BIC	#177400,R3
+		MOV	R3,R2
+9$:		RETURN
+
+; Z clear when the entity overlaps the player's body.
+ENT_HITPLAYER:	TST	PDEAD
+		BNE	9$
+		MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		SUB	PX,R0
+		CMP	R0,#-4
+		BLT	9$
+		CMP	R0,#12.
+		BGT	9$
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		SUB	PY,R0
+		CMP	R0,#-12.
+		BLT	9$
+		CMP	R0,#28.
+		BGT	9$
+		MOV	#1,R0		; Z clear: hit
+		RETURN
+9$:		CLR	R0
+		RETURN
+
+; ------------------------------------------------------------------
+; A grenade clears the destructible scenery around it: every cell of
+; class 1 in a 3x3 block loses its tile.
+GREN_BLAST:	MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		DEC	R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		DEC	R1
+		MOV	#3,R3
+1$:		MOV	R1,-(SP)
+		MOV	#3,R2
+2$:		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		MOV	R3,-(SP)
+		CMP	R0,#NROWS
+		BHIS	3$
+		CMP	R1,#NCOLS
+		BHIS	3$
+		CALL	CELLADDR
+		CMPB	C.SOLID(R2),#1
+		BNE	3$
+		CLRB	C.SOLID(R2)
+		CLRB	C.SLOT(R2)
+3$:		MOV	(SP)+,R3
+		MOV	(SP)+,R2
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		INC	R1
+		SOB	R2,2$
+		MOV	(SP)+,R1
+		INC	R0
+		SOB	R3,1$
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		DEC	R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		DEC	R1
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	#3,R2
+		MOV	#3,R3
+		CALL	CELL_RECT
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	#3,R2
+		MOV	#3,R3
+		CALL	MARK_RECT
+		RETURN

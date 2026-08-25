@@ -1,0 +1,15 @@
+--- /var/www/own/mc0511test/toolchain/extree.c	2026-05-01 23:43:55.881166892 +0300
++++ tmp/macro11-src/extree.c	2026-08-23 15:35:36.516734759 +0300
+@@ -299,8 +299,10 @@
+         break;
+ 
+     case EX_ERR:
+-        /* Copy */
+-        res = ex_err(tp->data.child.left, tp->cp);
++        /* Copy.  The child must be deep-copied (via evaluate): the
++           original tree is freed by the caller, and sharing the child
++           pointer left a dangling reference (use-after-free). */
++        res = ex_err(tp->data.child.left ? evaluate(tp->data.child.left, undef) : NULL, tp->cp);
+         break;
+ 
+     case EX_ADD:

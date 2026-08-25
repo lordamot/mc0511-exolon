@@ -1,0 +1,79 @@
+; ------------------------------------------------------------------
+; Uninitialised RAM: the PPU mailbox, game variables and the entity
+; lists.  Placed above the cell buffer - nothing here emits bytes, so
+; the code must initialise whatever it uses.  This module assembles
+; before the code (every label is then known everywhere) and returns
+; the location counter to 0 for boot.mac at the end.
+; ------------------------------------------------------------------
+		. = 146000
+
+; PPU mailbox (written by the PPU program through @#177010/177014).
+; CPU_VSYNC must directly follow KEYS_DATA - the PPU timer writes them
+; back to back.
+KEYS_DATA:	.BLKW	1	; key state word from the PPU
+CPU_VSYNC:	.BLKW	1	; nonzero once per 50 Hz tick
+SND_REQ:	.BLKW	1	; sound request (SFX_* in defs.mac)
+SND_MODE:	.BLKW	1	; nonzero = play the title tune
+ROWPALS:	.BLKW	48.	; 24 x 2 palette words (PPU COMMAND_2)
+
+; ---- frame / input ----------------------------------------------
+VBLF:		.BLKW	1	; vsync bits (ISR shifts in, loop consumes)
+FRAMECNT:	.BLKW	1	; frames since the zone was loaded
+TICK:		.BLKW	1	; free-running tick
+KEYS:		.BLKW	1	; debounced key word for this frame
+KEYPREV:	.BLKW	1
+
+; ---- zone -------------------------------------------------------
+ZONE:		.BLKW	1	; current zone 0..124
+ZONELOAD:	.BLKW	1	; nonzero = (re)load the zone this frame
+NLIVE:		.BLKW	1	; live scenery objects in OBJLIST
+ROWINK:		.BLKB	16.	; ink -> slot map while a row is converted
+ROWCNT:		.BLKW	16.	; ink pixel weights for the current row
+ROWPAL3:	.BLKB	4	; the three inks chosen for the row
+WHITESL:	.BLKB	24.	; per row: the slot whose ink is nearest white
+		.EVEN
+ROWW3:		.BLKW	3	; pixel weight of each chosen ink
+ROWWTOT:	.BLKW	1	; total lit pixels in the row
+		.EVEN
+
+; ---- player -----------------------------------------------------
+PX:		.BLKW	1	; x in 2-pixel units (0..127)
+PY:		.BLKW	1	; y in pixels, top of the 32-line sprite
+PXENT:		.BLKW	1	; zone entry position (respawn)
+PYENT:		.BLKW	1
+PFACE:		.BLKW	1	; +1 right, -1 left
+PJUMP:		.BLKW	1	; jump arc counter, 0 = on the ground
+PWALK:		.BLKW	1	; walk animation counter 0..9
+PDUCK:		.BLKW	1
+PSUIT:		.BLKW	1	; power-suit frame offset (0 or 12.)
+PDEAD:		.BLKW	1	; death animation counter
+PFALL:		.BLKW	1	; free fall
+PFRAME:		.BLKW	1	; frame drawn last time
+POLDX:		.BLKW	1	; where the sprite was drawn last frame
+POLDY:		.BLKW	1
+POLDF:		.BLKW	1
+
+; ---- score / status ---------------------------------------------
+AMMO:		.BLKW	1
+GRENADES:	.BLKW	1
+LIVES:		.BLKW	1
+SCORE:		.BLKB	6	; six ASCII digits
+		.EVEN
+HUDDIRTY:	.BLKW	1
+
+; ---- entity + object lists --------------------------------------
+ENTS:		.BLKB	E.SIZE*NENT
+		.EVEN
+OBJLIST:	.BLKB	O.SIZE*NOBJ
+		.EVEN
+
+; ---- scratch ----------------------------------------------------
+SPRSHIFT:	.BLKW	1
+SPRNOT:		.BLKW	1	; planes the sprite must not light
+SPRY:		.BLKW	1
+SPRSRC:		.BLKW	1
+SPRDST:		.BLKW	1
+TMPA:		.BLKW	1
+TMPB:		.BLKW	1
+
+		. = 0		; back to the boot sector origin

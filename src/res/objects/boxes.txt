@@ -1,0 +1,15 @@
+; Bounding boxes of the live scenery objects, from the table at
+; 0x94C6 in the original: <object> <dx> <w> <dy> <h>, in the
+; game's units (x in 2-pixel steps, y in pixels), relative to
+; the object's cell position.
+
+box 5 -1 8 -2 5
+box 13 -3 5 -2 10
+box 15 -2 7 -1 9
+box 16 -2 6 -2 8
+box 18 -6 11 1 7
+box 21 -2 7 -2 8
+box 31 -1 6 -2 6
+box 40 -1 6 -2 8
+box 44 -1 8 -2 4
+box 46 -1 5 -2 6

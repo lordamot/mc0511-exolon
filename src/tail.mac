@@ -1,0 +1,7 @@
+; ------------------------------------------------------------------
+; Pad the image to PROG_SIZE.  The build fails here when the program
+; outgrows its budget.
+; ------------------------------------------------------------------
+		.BLKB	PROG_SIZE-.
+PROG_END:
+		.END

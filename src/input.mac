@@ -1,0 +1,29 @@
+; ------------------------------------------------------------------
+; Keyboard.  The PPU program publishes a key bitmap in KEYS_DATA once
+; per 50 Hz tick; the game reads it once per frame so a key held down
+; is stable for the whole update.
+; ------------------------------------------------------------------
+
+K_UP	= 1		; arrow up    - jump
+K_RIGHT	= 2
+K_DOWN	= 4		; arrow down  - crouch
+K_LEFT	= 10
+K_ENTER	= 20		; menu select
+K_FIRE	= 40		; ФИКС or space
+K_PAUSE	= 200		; АП2
+K_GREN	= 20000		; numpad ВВОД - grenade
+K_STOP	= 100000
+
+INPUT_READ:	MOV	KEYS,KEYPREV
+		MOV	KEYS_DATA,KEYS
+		RETURN
+
+; Z clear when the key(s) in R0 went down this frame.
+KEY_EDGE:	MOV	KEYS,R1
+		BIC	KEYPREV,R1
+		BIT	R0,R1
+		RETURN
+
+; Z clear while the key(s) in R0 are held.
+KEY_HELD:	BIT	R0,KEYS
+		RETURN

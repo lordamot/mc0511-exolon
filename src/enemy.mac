@@ -1,0 +1,170 @@
+; ------------------------------------------------------------------
+; The zone's live scenery: cannons that shoot along the player's row,
+; rocket banks that launch when he comes near, dishes and hoppers.
+; Each entry of OBJLIST carries its own timer; the behaviour is picked
+; by the object id (the same ids the zone data uses).
+; ------------------------------------------------------------------
+
+CANNON_RATE = 70.	; frames between shots
+ROCKET_RATE = 90.
+DISH_RATE = 110.
+HOPPER_RATE = 60.
+
+ENEMY_UPD:	TST	NLIVE
+		BEQ	9$
+		MOV	#OBJLIST,R5
+		MOV	NLIVE,R4
+1$:		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+		CALL	ENEMY_ONE
+		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+		ADD	#O.SIZE,R5
+		SOB	R4,1$
+9$:		RETURN
+
+; one object: R5 = record
+ENEMY_ONE:	MOVB	O.OBJ(R5),R0
+		BIC	#177400,R0
+		BIT	#200,R0
+		BNE	9$			; destroyed
+		CMP	R0,#OB_CANNON
+		BEQ	EO_CANNON
+		CMP	R0,#OB_GUN
+		BEQ	EO_CANNON
+		CMP	R0,#OB_ROCKET
+		BEQ	EO_ROCKET
+		CMP	R0,#OB_DISH
+		BEQ	EO_DISH
+		CMP	R0,#OB_HOPPER
+		BEQ	EO_HOPPER
+9$:		RETURN			; rocks, trees, mines: contact only
+
+; ------------------------------------------------------------------
+; A cannon fires horizontally at the player when he is roughly level
+; with the muzzle and on the side the barrel points to.
+EO_CANNON:	INCB	O.T(R5)
+		CMPB	O.T(R5),#CANNON_RATE
+		BLO	9$
+		CLRB	O.T(R5)
+		CALL	EO_LEVEL		; player within +/- 1 row?
+		BEQ	9$
+		MOVB	O.COL(R5),R1
+		BIC	#177400,R1
+		ASL	R1
+		ASL	R1			; muzzle x in 2-px units
+		MOVB	O.ROW(R5),R2
+		BIC	#177400,R2
+		ASL	R2
+		ASL	R2
+		ASL	R2			; muzzle y in pixels
+		MOV	#-2,R4			; fire towards the player
+		CMP	PX,R1
+		BLE	1$
+		MOV	#2,R4
+		ADD	#12.,R1
+		BR	2$
+1$:		SUB	#8.,R1
+		BLT	9$
+2$:		MOV	#EK_SHOT,R0
+		CALL	ENT_SPAWN
+		MOV	#SFX_SHOT,SND_REQ
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; A rocket bank launches when the player is within four columns.
+EO_ROCKET:	INCB	O.T(R5)
+		CMPB	O.T(R5),#ROCKET_RATE
+		BLO	9$
+		CALL	EO_NEAR
+		BEQ	9$
+		CLRB	O.T(R5)
+		MOVB	O.COL(R5),R1
+		BIC	#177400,R1
+		ASL	R1
+		ASL	R1
+		MOVB	O.ROW(R5),R2
+		BIC	#177400,R2
+		ASL	R2
+		ASL	R2
+		ASL	R2
+		SUB	#12.,R2
+		BLT	9$
+		MOV	#-1,R4
+		CMP	PX,R1
+		BLE	1$
+		MOV	#1,R4
+1$:		MOV	#EK_SHOT,R0
+		CALL	ENT_SPAWN
+		MOV	#SFX_SHOT,SND_REQ
+9$:		RETURN
+
+EO_DISH:	INCB	O.T(R5)
+		CMPB	O.T(R5),#DISH_RATE
+		BLO	1$
+		CLRB	O.T(R5)
+		BR	EO_AIMED
+1$:		RETURN
+
+EO_HOPPER:	INCB	O.T(R5)
+		CMPB	O.T(R5),#HOPPER_RATE
+		BLO	1$
+		CLRB	O.T(R5)
+		CALL	EO_NEAR
+		BNE	EO_AIMED
+1$:		RETURN
+
+EO_AIMED:	MOVB	O.COL(R5),R1
+		BIC	#177400,R1
+		ASL	R1
+		ASL	R1
+		MOVB	O.ROW(R5),R2
+		BIC	#177400,R2
+		ASL	R2
+		ASL	R2
+		ASL	R2
+		SUB	#4,R2
+		BLT	9$
+		MOV	#-1,R4
+		CMP	PX,R1
+		BLE	1$
+		MOV	#1,R4
+		ADD	#8.,R1
+1$:		MOV	#EK_SHOT,R0
+		CALL	ENT_SPAWN
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; Z clear when the player's body overlaps the object's row band.
+EO_LEVEL:	MOV	PY,R0
+		ADD	#16.,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	O.ROW(R5),R1
+		BIC	#177400,R1
+		SUB	R1,R0
+		CMP	R0,#-2
+		BLT	9$
+		CMP	R0,#2
+		BGT	9$
+		MOV	#1,R0
+		RETURN
+9$:		CLR	R0
+		RETURN
+
+; Z clear when the player is within four columns.
+EO_NEAR:	MOV	PX,R0
+		ASR	R0
+		ASR	R0
+		MOVB	O.COL(R5),R1
+		BIC	#177400,R1
+		SUB	R1,R0
+		CMP	R0,#-6
+		BLT	9$
+		CMP	R0,#6
+		BGT	9$
+		MOV	#1,R0
+		RETURN
+9$:		CLR	R0
+		RETURN

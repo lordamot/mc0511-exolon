@@ -1,0 +1,164 @@
+; ------------------------------------------------------------------
+; Boot sector + FDD loader.  Adapted from ../mc0511-openit (same
+; firmware conventions): the firmware loads sector 0 (this file's
+; first 512 bytes) and jumps to 0; we bootstrap a small PPU stub,
+; then pull the rest of the program (LOAD_LEN sectors from LBA 1)
+; through the channel K2 FDD service, drawing a progress bar.
+; ------------------------------------------------------------------
+		. = 0
+	        NOP				; bootable disk marker
+		BR	DISK_START
+TRAP4VEC:	.WORD	TRAP4ADDR
+TRAP4ADDR:	.WORD	002			; RTI opcode
+
+K2_FDD_LOAD:	MOVB	#377,K2_ERR_CODE
+		MOV	#K2_FDD_PARAMS,R2	; address of block with terminating bytes
+K2_PPU_LOAD:	MOV	#5,R3			; byte count = 4 (+1 since we jump straight to SOB)
+		BR	2$
+1$:		MOVB	(R2)+,@#176676		; send next byte
+2$:		TSTB	@#176674		; channel K2 ready to transmit?
+		BPL	2$
+		SOB	R3,1$
+		RETURN
+
+DISK_START:	CLR	@#177560		; disable keyboard interrupt
+		MOVB	R0,@#K2_DEV_NUMBER	; R0 = drive number
+		CALL	PPU_BOOTLOAD
+		MTPS	R3
+		MOV	SP,-(SP)
+		MOV	#PARAMS_MAINDATA,R0
+		BR	LOADER
+
+CURRENT_LBA:	.WORD	0			; LBA offset after disk operations
+		.BLKB	100-.
+V100:		.WORD	INTERR
+VSYNC_ADDR:	.WORD	2			; RTI opcode
+
+K2_PPU:		MOV	#PPU_PARAMS,R2
+		BR	K2_PPU_LOAD
+
+LOADER:		MOV	#CURRENT_LBA,R4
+		MOV	(R0)+,K2_CPU_ADDR	; load address in CPU memory
+		MOV	(R0)+,R1		; number of sectors to load
+		SWAB	R1			; convert to word count
+		MOV	R1,K2_LOAD_WORDS
+		MOV	(R0),R3			; starting LBA of the block
+		BNE	CALC_LBA
+		MOV	@R4,R3			; 0 = continue from current offset
+
+CALC_LBA:	CLR	R2			; track + sector of block start
+		DIV	#20.,R2
+		MOVB	R2,K2_FDD_TRACK		; track number (0-79)
+		CLR	R2
+		DIV	#10.,R2
+		INC	R3			; sector (1-based!)
+		MOVB	R3,K2_FDD_SECTOR
+		ROL	K2_DEV_NUMBER
+		ROR	R2
+		ROR	K2_DEV_NUMBER		; disk side into bit 7
+
+LOADER_1:	CALL	K2_FDD_LOAD
+1$:		TSTB	K2_ERR_CODE
+		BMI	1$			; wait for the operation to finish
+		BNE	LOADER_1		; error - retry (transient FDD
+						; errors do happen on spin-up)
+		SWAB	R1			; back to sector count
+		TST	@R0			; loaded from current offset?
+		BEQ	2$
+		MOV	@R0,@R4
+2$:		ADD	R1,@R4			; adjust the current offset
+		TST	(R0)+
+		RETURN
+					; channel K2 transfer parameter block
+K2_ERR_CODE:	.BYTE	-1		; error code (0 = OK, written by PPU)
+K2_COMMAND:	.BYTE	10		; command: load into CPU memory
+K2_DEV_TYPE:	.BYTE	2		; device - FDD 80 tracks
+K2_DEV_NUMBER:	.BYTE	0		; FDD number + bit 7 = side
+K2_FDD_TRACK:	.BYTE	0		; track (0-79)
+K2_FDD_SECTOR:	.BYTE	0		; sector (1-10!)
+K2_CPU_ADDR:	.WORD	0		; load address in CPU memory
+K2_LOAD_WORDS:	.WORD	0		; load size in words
+K2_FDD_PARAMS:	.WORD	K2_ERR_CODE,-1
+LOAD_LEN = <PROG_END-LOOP>/2/256.
+PARAMS_MAINDATA:.WORD	1000,LOAD_LEN,1
+
+; 50 Hz interrupt during load: animated progress bar
+INTERR:		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R3,-(SP)
+		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+		MOV	#176640,R5
+		MOV	@R5,-(SP)
+
+LOAD_BAR_XY = 146140				; 300.*80.+100040
+
+		MOV	PATTERN,R0
+		MOV	#176642,R4
+		MOV	(PC)+,@R5
+VAR_LOADBAR_XY:	.WORD	LOAD_BAR_XY
+		MOV	#7,R3
+
+1$:		MOV	#20,R1			; bar 7 lines high, 16 wide
+2$:		MOVB	R0,@R4
+		SWAB	R0
+		INC	@R5
+		SOB	R1,2$
+
+		ADD	#80.-16.,@R5
+		ASL	R0
+		ADC	R0
+		SOB	R3,1$
+		ASL	PATTERN
+PATTERN=.+2
+		ADC	#177400
+
+		MOV	(SP)+,@R5
+		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+		MOV	(SP)+,R3
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		RTI
+
+PPU_BOOTLOAD:	CALL	K2_PPU			; request a memory block in PPU RAM
+1$:		TSTB	PPU_ERR_CODE		; finished OK?
+		BNE	1$
+		MOVB	#20,PPU_COMMAND		; transfer CPU RAM -> PPU RAM
+		MOV	#PP_BOOT_START,PPU_LOAD_SIZE
+		CALL	K2_PPU
+		MOVB	#30,PPU_COMMAND		; start the program in PPU RAM
+		CALL	K2_PPU
+BUSY_CHECK:	BR	.			; spin until the PPU stub releases us
+		RETURN
+
+PP_LOADSIZE = <PP_BOOT_END/2>-<PP_BOOT_START/2>
+
+PPU_ERR_CODE:	.BLKB	1		; K2 request block
+PPU_COMMAND:	.BYTE	1		; 1 = allocate memory in PPU
+PPU_DEV:	.WORD	32		; device - PPU memory
+PPU_LOAD_ADDR:	.BLKW	1
+PPU_LOAD_SIZE:	.WORD	PP_LOADSIZE
+PPU_SEND_SIZE:	.WORD	PP_LOADSIZE
+PPU_PARAMS:	.WORD	PPU_ERR_CODE,-1
+
+; tiny PPU-side boot stub: sane screen while loading, timer on, release CPU
+PP_BOOT_START:	MOV	#146000,@#2470		; black background
+		MOV	#177735,@#2472
+		MOV	#6742,@#2456		; bottom service line after the top one
+		MOV	#2462,@#7026		; main screen after the service lines
+		MOV	#1,@#177054		; enable timer in CPU
+		MOV	#302,R0
+		MOV	#2,@R0
+		MOV	R0,@#100		; block vsync interrupts in PPU
+		MOV	R0,-(R0)		; and keyboard ones
+		MOV	#77407,@#2460  		; hide the cursor
+		MOV	#BUSY_CHECK/2,@#177010
+		CLRB	@#177014		; release the CPU busy-loop
+		RETURN
+PP_BOOT_END:
+		.BLKB	1000-.
+
+; ------------------------------------------------------------------
+
+LOOP:		JMP	MAIN_START

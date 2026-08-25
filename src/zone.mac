@@ -1,0 +1,326 @@
+; ------------------------------------------------------------------
+; Zone loading: run the zone's object list through the display-list
+; interpreter, register the live objects, pick a palette for every
+; cell row, expand the cell buffer into the back buffer and show it.
+; ------------------------------------------------------------------
+
+; ZX ink 0..15 -> UKNC palette nibble (Y*8 + R*4 + G*2 + B).
+INKNIB:		.BYTE	0,1,4,5,2,3,6,7
+		.BYTE	10,11,14,15,12,13,16,17
+; population count of 0..7, doubled (the colour-distance metric)
+POPC3:		.BYTE	0,2,2,4,2,4,4,6
+		.EVEN
+
+; ------------------------------------------------------------------
+; Load the zone in ZONE.
+ZONE_LOAD:	CLR	ZONELOAD
+		CLR	FRAMECNT
+		CALL	CELLS_CLEAR
+		CLR	NLIVE
+		CALL	ENTS_CLEAR
+		MOV	ZONE,R0
+		ASL	R0
+		MOV	ZONE_TAB(R0),R5
+		ADD	#ZONE_DATA,R5
+10$:		MOVB	(R5),R0
+		BIC	#177400,R0
+		CMP	R0,#377
+		BEQ	20$
+		MOV	R0,LROW			; cell row
+		MOVB	1(R5),R0
+		BIC	#177400,R0
+		MOV	R0,LCOL			; cell column (wraps at 256)
+		MOVB	2(R5),R0
+		BIC	#177400,R0
+		ADD	#3,R5
+		MOV	R5,-(SP)
+		MOV	R0,-(SP)
+		CALL	OBJ_REGISTER		; live object?
+		MOV	(SP)+,R0
+		MOV	#8.,LINK		; ZX ink 7 + 1
+		CLR	LBASE
+		MOV	#1,LSOLID
+		CLR	LHIT
+		CLR	LSTKP
+		ASL	R0
+		MOV	LIST_TAB(R0),R4
+		ADD	#LISTS,R4
+		CALL	LIST_RUN
+		MOV	(SP)+,R5
+		BR	10$
+
+20$:		CALL	HUD_INIT
+		CALL	ROW_PALETTES
+		MOV	#2,R0			; PPU: reload the row palettes
+		CALL	SEND_PP_COMM
+		CALL	EXPAND_ALL
+		CALL	BLIT_FULL
+		RETURN
+
+; ------------------------------------------------------------------
+; Empty every cell (slot 0 = never drawn).
+CELLS_CLEAR:	MOV	#CELLS,R0
+		MOV	#NROWS*NCOLS,R1
+1$:		CLR	(R0)+
+		CLR	(R0)+
+		SOB	R1,1$
+		RETURN
+
+; ------------------------------------------------------------------
+; If object R0 has a bounding box, append it to OBJLIST with its cell
+; box (the original's table at 0x94C6 works in cell units too).
+; LROW / LCOL hold the placement.  Preserves R0.
+OBJ_REGISTER:	CMP	NLIVE,#NOBJ
+		BHIS	9$
+		MOV	R0,R1
+		ASL	R1
+		ASL	R1
+		ADD	#BOXTAB,R1
+		TSTB	1(R1)			; width 0 = not a live object
+		BEQ	9$
+		MOV	NLIVE,R2
+		MOV	R2,R3
+		ASL	R3
+		ASL	R3
+		ASL	R3			; *O.SIZE
+		ADD	#OBJLIST,R3
+		MOVB	(R1)+,R4		; dx
+		ADD	LCOL,R4
+		MOVB	R4,O.X0(R3)
+		MOVB	(R1)+,R5		; w
+		ADD	R5,R4
+		MOVB	R4,O.X1(R3)
+		MOVB	(R1)+,R4		; dy
+		ADD	LROW,R4
+		MOVB	R4,O.Y0(R3)
+		MOVB	(R1)+,R5		; h
+		ADD	R5,R4
+		MOVB	R4,O.Y1(R3)
+		MOVB	LCOL,O.COL(R3)
+		MOVB	LROW,O.ROW(R3)
+		MOVB	R0,O.OBJ(R3)
+		CLRB	O.T(R3)
+		INC	NLIVE
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; Run display list R0 at cell (R1 = row, R2 = column) with the usual
+; starting state.  Clobbers everything.
+RUN_LIST:	MOV	R1,LROW
+		MOV	R2,LCOL
+		MOV	#8.,LINK
+		CLR	LBASE
+		MOV	#1,LSOLID
+		CLR	LHIT
+		CLR	LSTKP
+		CLR	LERASE
+		ASL	R0
+		MOV	LIST_TAB(R0),R4
+		ADD	#LISTS,R4
+		CALL	LIST_RUN
+		RETURN
+
+; ------------------------------------------------------------------
+; Wipe the live object at R3 off the map: its own display list is run
+; again in erase mode, so exactly the cells it painted go blank, and
+; the object is flagged dead (bit 7 of its id).  Clobbers everything.
+OBJ_ERASE:	MOVB	O.OBJ(R3),R0
+		BIC	#177400,R0
+		BIT	#200,R0
+		BNE	9$			; already gone
+		BISB	#200,O.OBJ(R3)
+		MOVB	O.ROW(R3),R1
+		BIC	#177400,R1
+		MOV	R1,LROW
+		MOVB	O.COL(R3),R1
+		BIC	#177400,R1
+		MOV	R1,LCOL
+		MOV	#8.,LINK
+		CLR	LBASE
+		MOV	#1,LSOLID
+		CLR	LHIT
+		CLR	LSTKP
+		MOV	#1,LERASE
+		ASL	R0
+		MOV	LIST_TAB(R0),R4
+		ADD	#LISTS,R4
+		CALL	LIST_RUN
+		CLR	LERASE
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; Pick a palette for each of the 22 zone rows and rewrite the cells'
+; inks as slots.  The three inks that cover the most pixels win; the
+; rest snap to the nearest survivor (bitwise RGB distance, with the
+; brightness bit worth half a component).  Rows 22..23 are the HUD and
+; keep the fixed palette set by HUD_INIT.
+ROW_PALETTES:	CLR	R5			; row
+1$:		MOV	R5,-(SP)
+		CALL	ROW_ONE
+		MOV	(SP)+,R5
+		INC	R5
+		CMP	R5,#PLAYROWS
+		BLO	1$
+		RETURN
+
+; one row: R5 = row number (kept in ROWTMP - everything here clobbers
+; registers freely).
+ROW_ONE:	MOV	R5,ROWTMP
+		MOV	#ROWCNT,R0		; clear the ink weights
+		MOV	#16.,R1
+1$:		CLR	(R0)+
+		SOB	R1,1$
+
+		CLR	ROWWTOT
+		MOV	ROWTMP,R0		; weigh the row's inks by the
+		CLR	R1			; pixels each tile lights
+		CALL	CELLADDR
+		MOV	R2,R3
+		MOV	#NCOLS,R4
+2$:		MOVB	C.SLOT(R3),R0
+		BIC	#177400,R0
+		BEQ	3$
+		DEC	R0			; ZX ink 0..15
+		ASL	R0
+		MOV	@R3,R1			; tile index
+		ADD	#TILE_WT,R1
+		MOVB	@R1,R2
+		BIC	#177400,R2
+		ADD	R2,ROWCNT(R0)
+		ADD	R2,ROWWTOT
+3$:		ADD	#C.SIZE,R3
+		SOB	R4,2$
+
+		MOV	#3,R4			; the three heaviest inks win
+		MOV	#ROWPAL3,R5
+		MOV	#ROWW3,R3
+		CLR	(R3)+
+		CLR	(R3)+
+		CLR	(R3)+
+4$:		CLR	R0			; best ink
+		CLR	R1			; best weight
+		MOV	#16.,R2
+		CLR	R3
+5$:		MOV	R3,-(SP)
+		ASL	R3
+		CMP	ROWCNT(R3),R1
+		BLOS	6$
+		MOV	ROWCNT(R3),R1
+		MOV	@SP,R0
+6$:		MOV	(SP)+,R3
+		INC	R3
+		SOB	R2,5$
+		MOV	#3,R3			; remember the weight we picked
+		SUB	R4,R3
+		ASL	R3
+		MOV	R1,ROWW3(R3)
+		TST	R1			; an empty row would go all black,
+		BNE	30$			; so fall back on the HUD colours
+		MOV	#3,R0			; (text printed later must show)
+		SUB	R4,R0
+		MOVB	HUDPAL(R0),R0
+		BIC	#177400,R0
+		MOVB	R0,(R5)+
+		BR	31$
+30$:		MOVB	R0,(R5)+
+		ASL	R0
+		CLR	ROWCNT(R0)
+31$:		SOB	R4,4$
+
+		CALL	WHITE_SLOT3
+		CALL	INK_MAP
+		MOV	ROWTMP,R0	; sprites use the slot nearest white
+		MOVB	ROWINK+15.,R1
+		MOVB	R1,WHITESL(R0)			; ROWINK: ink -> slot 1..3
+
+		MOV	ROWTMP,R0		; rewrite the row's cells
+		CLR	R1
+		CALL	CELLADDR
+		MOV	R2,R3
+		MOV	#NCOLS,R4
+7$:		MOVB	C.SLOT(R3),R0
+		BIC	#177400,R0
+		BEQ	8$
+		DEC	R0
+		MOVB	ROWINK(R0),R0
+		MOVB	R0,C.SLOT(R3)
+8$:		ADD	#C.SIZE,R3
+		SOB	R4,7$
+		MOV	ROWTMP,R0
+		CALL	ROW_PALWORDS
+		RETURN
+
+; ------------------------------------------------------------------
+; Write the palette element of row R0 from ROWPAL3.  Pixel value 2 is
+; slot 1 (word 1, nibble 2), value 4 is slot 2 (word 2, nibble 0) and
+; value 6 is slot 3 (word 2, nibble 2); value 0 stays black.
+ROW_PALWORDS:	ASL	R0
+		ASL	R0
+		MOVB	ROWPAL3,R1
+		MOVB	INKNIB(R1),R2
+		BIC	#177400,R2
+		SWAB	R2
+		MOV	R2,ROWPALS(R0)
+		MOVB	ROWPAL3+1,R1
+		MOVB	INKNIB(R1),R2
+		BIC	#177400,R2
+		MOVB	ROWPAL3+2,R1
+		MOVB	INKNIB(R1),R3
+		BIC	#177400,R3
+		SWAB	R3
+		BIS	R3,R2
+		MOV	R2,ROWPALS+2(R0)
+		RETURN
+
+ROWTMP:		.WORD	0
+
+; ------------------------------------------------------------------
+; Sprites want white.  If the row's third ink is only a detail colour
+; (less than a quarter of the row's pixels) its slot goes to white, so
+; the player shows white almost everywhere; a row whose third ink is a
+; big object keeps it and the sprite settles for the nearest colour.
+; Rows above 8 are sky: the player never reaches them, so they are
+; left alone and the planets keep their own inks.
+WHITE_SLOT3:	CMP	ROWTMP,#8.	; the sky is out of the player's
+		BLO	9$		; reach, so it keeps all its colours
+		CMPB	ROWPAL3+2,#15.
+		BEQ	9$
+		MOV	ROWW3+4,R0
+		ASL	R0
+		ASL	R0
+		CMP	R0,ROWWTOT
+		BHIS	9$
+		MOVB	#15.,ROWPAL3+2
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; Build ROWINK: every ink 0..15 -> slot 1..3, exact match first, else
+; the closest of the three chosen inks (bitwise RGB distance, the
+; brightness bit worth half a component).
+INK_MAP:	CLR	R5
+1$:		MOV	#3,R0
+		CLR	R1			; best slot - 1
+		MOV	#377,R2			; best distance
+		CLR	R3
+2$:		MOVB	ROWPAL3(R3),R4
+		XOR	R5,R4
+		BIC	#177760,R4
+		MOV	R4,-(SP)
+		BIC	#177770,R4
+		MOVB	POPC3(R4),R4
+		BIC	#177400,R4
+		BIT	#10,(SP)+
+		BEQ	3$
+		INC	R4
+3$:		CMP	R4,R2
+		BHIS	4$
+		MOV	R4,R2
+		MOV	R3,R1
+4$:		INC	R3
+		SOB	R0,2$
+		INC	R1
+		MOVB	R1,ROWINK(R5)
+		INC	R5
+		CMP	R5,#16.
+		BLO	1$
+		RETURN

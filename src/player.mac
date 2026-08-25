@@ -1,0 +1,481 @@
+; ------------------------------------------------------------------
+; Vitorc: movement, the jump arc, crouching, the power suit, death.
+;
+; X is in 2-pixel units (0..127, one cell = 4 units), Y in pixels and
+; is the top line of the 24x32 sprite.  Walking is one unit a frame
+; and the jump follows the original's 22-entry delta table.
+; ------------------------------------------------------------------
+
+; the original's arc at 0x826A, read with the counter running 22 -> 1
+JUMPARC:	.BYTE	4,4,2,2,2,1,1,1,1,0,0,0,0,-1,-1,-1,-1,-2,-2,-2,-4,-4
+		.EVEN
+JUMPLEN	= 22.
+
+PL_H	= 32.		; sprite height in pixels
+PL_FOOT	= 31.		; the line the feet stand on
+FALLSTEP = 4		; pixels per frame in free fall
+
+; ------------------------------------------------------------------
+PLAYER_INIT:	MOV	PXENT,PX
+		MOV	PYENT,PY
+		MOV	#1,PFACE
+		CLR	PJUMP
+		CLR	PWALK
+		CLR	PDUCK
+		CLR	PDEAD
+		CLR	PFALL
+		CLR	PFRAME
+		CLR	PSTEP
+		MOV	PX,POLDX
+		MOV	PY,POLDY
+		MOV	#-1,POLDF
+		RETURN
+
+; ------------------------------------------------------------------
+; One frame of the player.  This follows the original's shape (0x81A4
+; and friends): the collision map is only consulted on cell edges -
+; walls when x is cell aligned, the floor when y is - which is what
+; makes Vitorc walk in front of most scenery and only stop at real
+; obstacles.
+PLAYER_UPD:	TST	PDEAD
+		BEQ	1$
+		JMP	PL_DYING
+1$:		CALL	PL_READDIR	; R5 = -1 / 0 / +1
+		MOV	R5,PSTEP
+		TST	PFALL
+		BNE	PL_FALLING
+		TST	PJUMP
+		BNE	PL_JUMPING
+		CALL	PL_FLOOR
+		BEQ	PL_FALLING
+		CLR	PDUCK
+		MOV	#K_DOWN,R0	; crouching stops everything else
+		CALL	KEY_HELD
+		BEQ	2$
+		MOV	#1,PDUCK
+		MOV	#10.,PFRAME
+		JMP	PL_TRIGGERS
+2$:		MOV	#K_UP,R0
+		CALL	KEY_EDGE
+		BEQ	PL_WALK
+		MOV	#JUMPLEN,PJUMP
+		MOV	#SFX_STEP,SND_REQ
+
+; ---- in the air --------------------------------------------------
+PL_JUMPING:	MOV	PJUMP,R0
+		DEC	R0
+		MOVB	JUMPARC(R0),R0
+		DEC	PJUMP
+		TST	R0
+		BEQ	2$
+		BGT	1$
+		MOV	R0,-(SP)	; rising: mind the ceiling
+		CALL	PL_CEIL
+		BR	3$
+1$:		MOV	R0,-(SP)	; falling: mind the floor
+		CALL	PL_FLOOR
+3$:		BEQ	4$
+		TST	(SP)+		; something in the way: jump over
+		CLR	PJUMP
+		BR	PL_MOVEH
+4$:		MOV	(SP)+,R0
+		ADD	R0,PY
+2$:		MOV	#3,PFRAME
+		BR	PL_MOVEH
+
+; ---- free fall ---------------------------------------------------
+PL_FALLING:	CALL	PL_FLOOR
+		BNE	1$
+		MOV	#1,PFALL
+		MOV	#9.,PFRAME
+		ADD	#4,PY
+		CMP	PY,#192.-PL_H
+		BLE	2$
+		MOV	#192.-PL_H,PY
+2$:		JMP	PL_TRIGGERS
+1$:		CLR	PFALL
+
+; ---- on the ground -----------------------------------------------
+PL_WALK:	TST	PSTEP
+		BNE	1$
+		MOV	#5,PFRAME	; standing
+		JMP	PL_TRIGGERS
+1$:		MOV	PWALK,PFRAME
+		INC	PWALK
+		CMP	PWALK,#10.
+		BLO	PL_MOVEH
+		CLR	PWALK
+
+; ---- horizontal step, wall tested --------------------------------
+PL_MOVEH:	TST	PSTEP
+		BEQ	9$
+		BGT	1$
+		CALL	PL_WALLL
+		BR	2$
+1$:		CALL	PL_WALLR
+2$:		BNE	9$		; blocked
+		ADD	PSTEP,PX
+		TST	PX
+		BGE	3$
+		CLR	PX
+3$:		CMP	PX,#127.
+		BLOS	9$
+		MOV	#127.,PX
+9$:		CALL	PL_ZONEEDGE
+		JMP	PL_TRIGGERS
+
+; ------------------------------------------------------------------
+; Which way the player is being pushed: R5 = -1, 0 or +1.
+PL_READDIR:	CLR	R5
+		MOV	#K_LEFT,R0
+		CALL	KEY_HELD
+		BEQ	1$
+		MOV	#-1,R5
+		MOV	#-1,PFACE
+		RETURN
+1$:		MOV	#K_RIGHT,R0
+		CALL	KEY_HELD
+		BEQ	9$
+		MOV	#1,R5
+		MOV	#1,PFACE
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; The three collision tests, ported from 0x80F3 / 0x8122 / 0x814E.
+; Each returns Z set when the way is clear.  The player's body is
+; four cell rows tall and four columns wide; the map is only read when
+; the relevant coordinate sits on a cell boundary, and a fifth row is
+; added when the body straddles two rows.
+
+; right wall: the column just right of the body
+PL_WALLR:	CMP	PX,#116.	; the last columns are always free,
+		BHIS	9$		; so edge scenery cannot trap him
+		MOV	PX,R0
+		BIC	#177774,R0
+		BNE	9$		; only tested on a cell boundary
+		MOV	PX,R1
+		ASR	R1
+		ASR	R1
+		ADD	#3,R1
+		BR	PL_COLUMN
+9$:		CLR	R0		; Z set: clear
+		RETURN
+
+; left wall: the column just left of the body
+PL_WALLL:	TST	PX
+		BNE	1$
+		MOV	#1,R0		; the zone's left edge holds
+		RETURN
+1$:		MOV	PX,R0
+		BIC	#177774,R0
+		BNE	9$
+		MOV	PX,R1
+		ASR	R1
+		ASR	R1
+		DEC	R1
+		BR	PL_COLUMN
+9$:		CLR	R0
+		RETURN
+
+; OR the map over column R1 for the body's four (or five) rows
+PL_COLUMN:	MOV	R1,PCCOL
+		MOV	PY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOV	R0,PCROW
+		MOV	#4,R2
+		MOV	PY,R0
+		BIC	#177770,R0
+		BEQ	1$
+		INC	R2		; straddling two rows: one more
+1$:		CLR	PCACC
+2$:		MOV	PCROW,R0
+		MOV	PCCOL,R1
+		MOV	R2,-(SP)
+		CALL	MAP_CLASS
+		MOV	(SP)+,R2
+		BIS	R0,PCACC
+		INC	PCROW
+		SOB	R2,2$
+		MOV	PCACC,R0
+		RETURN
+
+; floor: the row just below the body
+PL_FLOOR:	MOV	PY,R0
+		BIC	#177770,R0
+		BNE	8$		; only tested on a cell boundary
+		MOV	PY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		ADD	#4,R0
+		MOV	R0,PCROW
+		MOV	PX,R1
+		ASR	R1
+		ASR	R1
+		MOV	R1,PCCOL
+		MOV	#3,R2
+		CMP	PX,#116.
+		BHIS	1$
+		MOV	PX,R0
+		BIC	#177774,R0
+		BEQ	1$
+		INC	R2		; straddling two columns
+1$:		CLR	PCACC
+2$:		MOV	PCROW,R0
+		MOV	PCCOL,R1
+		MOV	R2,-(SP)
+		CALL	MAP_CLASS
+		MOV	(SP)+,R2
+		BIS	R0,PCACC
+		INC	PCCOL
+		SOB	R2,2$
+		MOV	PCACC,R0
+		RETURN
+8$:		CLR	R0		; not on a cell boundary: keep going
+		RETURN
+
+; ceiling: the row just above the body
+PL_CEIL:	MOV	PY,R0
+		BIC	#177770,R0
+		BNE	8$
+		MOV	PY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		DEC	R0
+		BLT	9$
+		MOV	R0,PCROW
+		MOV	PX,R1
+		ASR	R1
+		ASR	R1
+		MOV	R1,PCCOL
+		MOV	#3,R2
+		CLR	PCACC
+1$:		MOV	PCROW,R0
+		MOV	PCCOL,R1
+		MOV	R2,-(SP)
+		CALL	MAP_CLASS
+		MOV	(SP)+,R2
+		BIS	R0,PCACC
+		INC	PCCOL
+		SOB	R2,1$
+		MOV	PCACC,R0
+		RETURN
+8$:		CLR	R0
+		RETURN
+9$:		MOV	#1,R0		; the top of the screen holds
+		RETURN
+
+PCROW:		.WORD	0
+PCCOL:		.WORD	0
+PCACC:		.WORD	0
+PSTEP:		.WORD	0
+
+; ------------------------------------------------------------------
+; Collision class of cell (R0 = row, R1 = col) -> R0.  Off-map cells
+; read as empty, so the sky and the sides never block.
+MAP_CLASS:	CMP	R0,#NROWS
+		BHIS	9$
+		CMP	R1,#NCOLS
+		BHIS	9$
+		CALL	CELLADDR
+		MOVB	C.SOLID(R2),R0
+		BIC	#177400,R0
+		RETURN
+9$:		CLR	R0
+		RETURN
+
+; ------------------------------------------------------------------
+; Pickups and hazards: scan the four cell rows and four columns the
+; player's body covers for a special collision class.  1 and 2 are
+; plain scenery, everything else means something.
+PL_TRIGGERS:	MOV	PY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOV	R0,PCROW
+		MOV	#4,R3
+1$:		MOV	PX,R1
+		ASR	R1
+		ASR	R1
+		MOV	R1,PCCOL
+		MOV	#4,R2
+2$:		MOV	PCROW,R0
+		MOV	PCCOL,R1
+		MOV	R2,-(SP)
+		MOV	R3,-(SP)
+		CALL	MAP_CLASS
+		MOV	(SP)+,R3
+		MOV	(SP)+,R2
+		CMP	R0,#2
+		BLOS	3$
+		MOV	PCROW,R4
+		MOV	PCCOL,R5
+		CALL	PL_TRIGGER1
+3$:		INC	PCCOL
+		SOB	R2,2$
+		INC	PCROW
+		SOB	R3,1$
+		RETURN
+
+; act on class R0 at cell (R4, R5)
+PL_TRIGGER1:	CMP	R0,#7		; ammunition canister
+		BNE	10$
+		MOV	#99.,AMMO
+		BR	PL_TAKE
+10$:		CMP	R0,#8.		; grenade canister
+		BNE	20$
+		MOV	#10.,GRENADES
+		BR	PL_TAKE
+20$:		CMP	R0,#11.		; power-suit pod
+		BNE	30$
+		MOV	#12.,PSUIT
+		BR	PL_TAKE
+30$:		CMP	R0,#13.		; a mine goes off on contact
+		BEQ	40$
+		CMP	R0,#5		; force fields, beams, plants
+		BEQ	40$
+		CMP	R0,#6
+		BEQ	40$
+		CMP	R0,#9.
+		BEQ	40$
+		CMP	R0,#12.
+		BEQ	40$
+		RETURN
+40$:		JMP	PLAYER_KILL
+
+; take the cell at (R4, R5): clear it and redraw it
+PL_TAKE:	MOV	#SFX_PICK,SND_REQ
+		MOV	R4,R0
+		MOV	R5,R1
+		CALL	CELLADDR
+		CLRB	C.SOLID(R2)
+		CLRB	C.SLOT(R2)
+		MOV	R4,R0
+		MOV	R5,R1
+		MOV	#1,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	R4,R0
+		MOV	R5,R1
+		MOV	#1,R2
+		MOV	#1,R3
+		CALL	MARK_RECT
+		MOV	#1,HUDDIRTY
+		RETURN
+
+; ------------------------------------------------------------------
+; Walking off the right edge moves on to the next zone.
+PL_ZONEEDGE:	CMP	PX,#124.
+		BLO	9$
+		INC	ZONE
+		CMP	ZONE,#125.
+		BLO	1$
+		CLR	ZONE		; wrap round after the last zone
+1$:		CLR	PX
+		MOV	PX,PXENT
+		MOV	PY,PYENT
+		MOV	#1,ZONELOAD
+		MOV	#SFX_ZONE,SND_REQ
+		CALL	SCORE_ZONE
+9$:		RETURN
+
+; ------------------------------------------------------------------
+PLAYER_KILL:	TST	PDEAD
+		BNE	9$
+		TST	PSUIT		; the power suit takes one hit
+		BEQ	1$
+		CLR	PSUIT
+		MOV	#SFX_BOOM,SND_REQ
+		MOV	#1,HUDDIRTY
+		RETURN
+1$:		MOV	#46.,PDEAD
+		MOV	#SFX_DIE,SND_REQ
+		CLR	PJUMP
+9$:		RETURN
+
+PL_DYING:	DEC	PDEAD
+		BEQ	10$
+		MOV	PDEAD,R0	; the body is thrown up and falls back
+		CMP	R0,#24.
+		BLO	1$
+		MOV	#-2,R0
+		BR	2$
+1$:		MOV	#2,R0
+2$:		ADD	R0,PY
+		TST	PY
+		BGE	3$
+		CLR	PY
+3$:		CMP	PY,#192.-PL_H
+		BLE	9$
+		MOV	#192.-PL_H,PY
+9$:		RETURN
+10$:		DEC	LIVES
+		BLE	20$
+		CLR	PSUIT
+		MOV	#99.,AMMO
+		MOV	#10.,GRENADES
+		CALL	PLAYER_INIT
+		MOV	#1,ZONELOAD
+		MOV	#1,HUDDIRTY
+		RETURN
+20$:		CLR	LIVES
+		MOV	#1,GAMEOVER
+		RETURN
+
+; ------------------------------------------------------------------
+; Which sprite frame the player shows: the movement code sets PFRAME,
+; and the power suit shifts the whole set by twelve.
+PL_FRAME:	TST	PDEAD
+		BEQ	1$
+		MOV	#11.,R0
+		BR	9$
+1$:		MOV	PFRAME,R0
+9$:		ADD	PSUIT,R0
+		RETURN
+
+; ------------------------------------------------------------------
+; Restore the background the player covered last frame.
+PL_ERASE:	TST	POLDF
+		BMI	9$
+		MOV	POLDY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOV	POLDX,R1
+		ASR	R1
+		ASR	R1
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	#5,R2
+		MOV	#5,R3
+		CALL	CELL_RECT
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	#5,R2
+		MOV	#5,R3
+		CALL	MARK_RECT
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; Draw this frame's sprite and mark the rectangle it covers.
+PL_SHOW:	CALL	PL_FRAME
+		MOV	PX,R1
+		MOV	PY,R2
+		CALL	SPR_PLAYER
+		MOV	PY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOV	PX,R1
+		ASR	R1
+		ASR	R1
+		MOV	#5,R2
+		MOV	#5,R3
+		CALL	MARK_RECT
+		MOV	PX,POLDX
+		MOV	PY,POLDY
+		MOV	#1,POLDF
+		RETURN

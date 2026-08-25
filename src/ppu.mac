@@ -1,0 +1,602 @@
+; ------------------------------------------------------------------
+; PPU-resident program.  Adapted from ../mc0511-openit: hooks the K1
+; command channel, the 50 Hz timer (keyboard word + vsync flag into
+; CPU RAM) and the keyboard; builds the game video line table.
+; New here: after init it never returns - the PPU idle loop is the
+; beeper music / SFX engine (speaker = bit 7 of @#177716), fed by the
+; SND_REQ / SND_MODE mailbox words in CPU RAM.
+;
+; Everything between PP_START and PP_END is copied into PPU RAM at a
+; firmware-allocated address: code must stay PC-relative, references
+; to CPU RAM go through @#177010 (word address / 2) + @#177014.
+; ------------------------------------------------------------------
+
+PP_START:	MOV	@#330,K1_SAVE		; save channel K1 receiver vector
+		MOV	PC,R0
+		ADD	#K1_PP-.,R0
+		MOV	R0,@#330		; new K1 interrupt handler
+		MOVB	#7,@#177066		; enable receiver interrupts
+		MOV	@#100,V100_SAVE
+		MOV	PC,R0
+		ADD	#PP_V100-.,R0
+		MOV	R0,@#100		; new line clock handler
+		MOV	@#300,KEYB_SAVE
+		MOV	PC,R0
+		ADD	#PP_KEYB-.,R0
+		MOV	R0,@#300		; new keyboard handler
+		MOV	PC,R0
+		ADD	#PP_START-.,R0
+		MOV	R0,PP_LOADBASE		; music tables base (offsets from PP_START)
+		MOV	PC,R1
+		ADD	#PP_COMMANDS-.-2,R1	; command handler table
+		MOV	R1,R0
+		SUB	#PP_COMMANDS-2,R1	; PPU-CPU address delta
+1$:		ADD	R1,(R0)+		; fix up handler addresses
+		TST	@R0
+		BNE	1$
+
+		CALL	NEW_TABLE		; program the game video line table
+		CALL	COMMAND_4		; set colors from the CPU array
+		CLR	@#177020		; black background registers
+		CLR	@#177022
+		CLR	@#177026		; write to all planes
+		MOV	#177010,R0
+		MOV	#PP_BUSY/2,@R0		; completion flag in CPU RAM
+		MOV	PC,@#177014		; signal: PPU program running
+		MOV	PC,PP_VSYNC_FLAG	; enable vsync exchange with CPU
+
+; ---- idle loop = sound engine (never returns) --------------------
+; The speaker is bit 7 of @#177716.  NOTE: bits 4/5 drive the CPU
+; HALT/DCLO pins and bit 15 (inverted) the ACLO pin, so every write
+; MUST have bit 15 set and bits 4-5 clear.
+SPK_OFF = 100000
+SPK_ON  = 100200
+
+SND_IDLE:	MTPS	#0			; interrupts open
+		MOV	#177010,R0
+		MOV	#SND_REQ/2,@R0
+		MOV	@#177014,R1		; pending effect?
+		BNE	SND_TAKE
+		MOV	#SND_MODE/2,@R0
+		TST	@#177014		; title tune wanted?
+		BNE	SND_TUNE
+		BR	SND_IDLE
+
+SND_TAKE:	CLR	@#177014		; accept: clear SND_REQ
+		DEC	R1			; 1 = laser shot
+		BNE	1$
+		CALL	SFX_SWEEP
+		BR	SND_IDLE
+1$:		DEC	R1			; 2 = explosion
+		BNE	2$
+		CALL	SFX_NOISE
+		BR	SND_IDLE
+2$:		DEC	R1			; 3 = pickup
+		BNE	3$
+		CALL	SFX_RISE
+		BR	SND_IDLE
+3$:		DEC	R1			; 4 = death
+		BNE	4$
+		CALL	SFX_FALL
+		BR	SND_IDLE
+4$:		DEC	R1			; 5 = footstep / jump
+		BNE	5$
+		CALL	SFX_CLICK
+		BR	SND_IDLE
+5$:		DEC	R1			; 6 = new zone
+		BNE	SND_IDLE
+		CALL	SFX_RISE
+		BR	SND_IDLE
+
+SND_OFF:	MOV	#SPK_OFF,@#177716
+		RETURN
+
+; ------------------------------------------------------------------
+; Three-voice beeper music.  Each voice is a 16-bit phase accumulator:
+; every pass adds the voice's increment and flips the speaker on the
+; carry, so the tone is inc/65536 of the loop rate and the pitch is
+; exact to a fraction of a hertz.  Three square waves XORed onto one
+; output is the classic way to get chords out of a single bit; an
+; increment of zero is a rest.  Note lengths are counted in "frames"
+; of MU_FRAME loop iterations.
+MU_FRAME = 421.		; loop passes in one 50 Hz frame
+
+SND_TUNE:	MOV	PC,R0			; point the three readers at
+		ADD	#MU_CH0-.,R0		; their streams
+		MOV	R0,MU_S0
+		MOV	R0,MU_B0
+		MOV	PC,R0
+		ADD	#MU_CH1-.,R0
+		MOV	R0,MU_S1
+		MOV	R0,MU_B1
+		MOV	PC,R0
+		ADD	#MU_CH2-.,R0
+		MOV	R0,MU_S2
+		MOV	R0,MU_B2
+		MOV	PC,R0
+		ADD	#MU_PERIODS-.,R0
+		MOV	R0,MU_PBASE
+		CLR	MU_D0
+		CLR	MU_D1
+		CLR	MU_D2
+		MOV	#1,MU_C0
+		MOV	#1,MU_C1
+		MOV	#1,MU_C2
+		CLR	MU_P0
+		CLR	MU_P1
+		CLR	MU_P2
+		MOV	#MU_FRAME,MU_TICK
+		MOV	#SPK_OFF,R5		; current speaker level
+		MOV	#200,R4			; the speaker bit
+		CLR	R0			; the three phases live in
+		CLR	R1			; registers: this loop is the
+		CLR	R2			; tone generator itself
+		MOV	MU_TICK,R3
+
+MU_LOOP:	ADD	MU_P0,R0		; voice 0
+		BCC	1$
+		XOR	R4,R5
+		MOV	R5,@#177716
+1$:		ADD	MU_P1,R1		; voice 1
+		BCC	2$
+		XOR	R4,R5
+		MOV	R5,@#177716
+2$:		ADD	MU_P2,R2		; voice 2
+		BCC	3$
+		XOR	R4,R5
+		MOV	R5,@#177716
+3$:		DEC	R3
+		BNE	MU_LOOP
+
+		MOV	#MU_FRAME,R3
+		MOV	R0,MU_C0		; park the phases over the
+		MOV	R1,MU_C1		; note bookkeeping
+		MOV	R2,MU_C2
+		MOV	R5,-(SP)
+		MOV	PC,R5
+		ADD	#MU_D0-.,R5
+		CALL	MU_STEP
+		MOV	PC,R5
+		ADD	#MU_D1-.,R5
+		CALL	MU_STEP
+		MOV	PC,R5
+		ADD	#MU_D2-.,R5
+		CALL	MU_STEP
+		MOV	(SP)+,R5
+		MOV	#200,R4
+		MOV	MU_C0,R0
+		MOV	MU_C1,R1
+		MOV	MU_C2,R2
+		MOV	#177010,R0		; stop for an effect or a
+		MOV	#SND_REQ/2,@R0		; request to be quiet
+		TST	@#177014
+		BNE	9$
+		MOV	#SND_MODE/2,@R0
+		TST	@#177014
+		BEQ	9$
+		MOV	MU_C0,R0
+		BR	MU_LOOP
+9$:		CALL	SND_OFF
+		JMP	SND_IDLE
+
+; One voice per call: R5 points at its {duration, period, counter,
+; stream} block.  Loops back to the start of the stream at the end.
+MU_D0:		.WORD	0		; frames left in the current note
+MU_P0:		.WORD	0		; countdown reload (0 = silent)
+MU_C0:		.WORD	1
+MU_S0:		.WORD	0		; stream pointer
+MU_B0:		.WORD	0		; stream start (for the loop)
+MU_D1:		.WORD	0
+MU_P1:		.WORD	0
+MU_C1:		.WORD	1
+MU_S1:		.WORD	0
+MU_B1:		.WORD	0
+MU_D2:		.WORD	0
+MU_P2:		.WORD	0
+MU_C2:		.WORD	1
+MU_S2:		.WORD	0
+MU_B2:		.WORD	0
+MU_TICK:	.WORD	0
+MU_PBASE:	.WORD	0
+
+MU_STEP:	TST	(R5)
+		BEQ	1$
+		DEC	(R5)
+		BNE	9$
+1$:		MOV	6(R5),R1		; stream pointer
+		MOVB	(R1),R0
+		BIC	#177400,R0
+		CMP	R0,#377
+		BNE	2$
+		MOV	10(R5),R1		; end of stream: start again
+		MOVB	(R1),R0
+		BIC	#177400,R0
+		CMP	R0,#377
+		BEQ	8$
+2$:		ASL	R0
+		ADD	MU_PBASE,R0
+		MOV	(R0),2(R5)		; phase increment (0 = rest)
+		MOVB	1(R1),R0
+		BIC	#177400,R0
+		MOV	R0,(R5)			; frames
+		ADD	#2,R1
+		MOV	R1,6(R5)
+9$:		RETURN
+8$:		CLR	2(R5)			; empty voice: stay silent
+		MOV	#377,(R5)
+		RETURN
+
+; ------------------------------------------------------------------
+; Sound effects, in the spirit of the original's beeper routines.
+; SFX_NOISE is the explosion (a pseudo-random burst that falls in
+; pitch), SFX_SWEEP the laser, SFX_RISE / SFX_FALL the pickup and
+; death jingles, SFX_CLICK the jump.
+SFX_NOISE:	MOV	#365,R3			; outer counter
+		MOV	#123,R4			; LFSR state
+		MOV	#246,R2			; XOR feedback
+1$:		INC	R4
+		ASR	R4
+		BCC	2$
+		XOR	R2,R4
+2$:		MOV	R4,R0
+		BIC	#177577,R0		; keep bit 7
+		BIS	#SPK_OFF,R0
+		MOV	R0,@#177716
+		MOV	R3,R1
+3$:		SOB	R1,3$			; pitch falls as R3 grows
+		INC	R3
+		CMP	R3,#400
+		BLO	1$
+		JMP	SND_OFF
+
+SFX_SWEEP:	MOV	#40,R3			; short downward chirp
+1$:		MOV	#4,R2
+2$:		MOV	#SPK_ON,@#177716
+		MOV	R3,R1
+3$:		SOB	R1,3$
+		MOV	#SPK_OFF,@#177716
+		MOV	R3,R1
+4$:		SOB	R1,4$
+		SOB	R2,2$
+		ADD	#6,R3
+		CMP	R3,#200
+		BLO	1$
+		JMP	SND_OFF
+
+SFX_RISE:	MOV	#300,R3
+1$:		MOV	#3,R2
+2$:		MOV	#SPK_ON,@#177716
+		MOV	R3,R1
+3$:		SOB	R1,3$
+		MOV	#SPK_OFF,@#177716
+		MOV	R3,R1
+4$:		SOB	R1,4$
+		SOB	R2,2$
+		SUB	#10,R3
+		CMP	R3,#40
+		BHI	1$
+		JMP	SND_OFF
+
+SFX_FALL:	MOV	#40,R3
+1$:		MOV	#6,R2
+2$:		MOV	#SPK_ON,@#177716
+		MOV	R3,R1
+3$:		SOB	R1,3$
+		MOV	#SPK_OFF,@#177716
+		MOV	R3,R1
+4$:		SOB	R1,4$
+		SOB	R2,2$
+		ADD	#12,R3
+		CMP	R3,#1000
+		BLO	1$
+		JMP	SND_OFF
+
+SFX_CLICK:	MOV	#SPK_ON,@#177716
+		MOV	#140,R0
+1$:		SOB	R0,1$
+		JMP	SND_OFF
+
+PP_LOADBASE:	.WORD	0		; PPU address of PP_START
+
+; ---- video line table --------------------------------------------
+; 288 lines of 80 bytes from plane address 100000, 320 mode
+; throughout.  Every 8-line cell row of the game area (lines
+; 48..239) starts with a 4-word palette element so each row can have
+; its own 8 colors (COMMAND_2 rewrites them from the CPU ROWPALS
+; array); a 25th element at line 240 restores the standard palette
+; below the game area.
+NEW_TABLE:	MOV	#26.,@#22670	; 26 text lines on the user screen
+		CLR	@#22752		; disable scrolling
+		CLR	@#2400		; black screen at once
+		CLR	@#2402
+		CALL	CLS_SCREEN_PP
+		MOV	#100000,R0	; start address of video RAM
+		MOV	#2410,R1	; video line table address
+		MOV	#2414,R3	; next element address
+		JSR	R5,SET_LINES	; top margin above the game area
+		.WORD	48.,80.
+
+		MOV	PC,R4		; palette-word addresses table
+		ADD	#ROWPAL_PTRS-.,R4
+		BIS	#6,-2(R1)	; link line 47 -> 4-word palette tag
+		MOV	#25.,R2		; 24 rows + restore element
+10$:		MOV	R1,(R4)+	; record this element's color words
+		MOV	#135220,(R1)+	; standard game palette (values
+		MOV	#177734,(R1)+	; 0..3 / 4..7) until COMMAND_2
+		MOV	R0,(R1)+	; the element's own display line
+		ADD	#80.,R0
+		MOV	R1,R3
+		ADD	#2,R3
+		MOV	R3,(R1)+	; link to the following element
+		CMP	R2,#1		; the restore element has no row body
+		BEQ	20$
+		MOV	R2,-(SP)	; 7 more lines of this cell row
+		MOV	R1,R3
+		ADD	#4,R3
+		JSR	R5,SET_LINES
+		.WORD	7.,80.
+		MOV	(SP)+,R2
+		ADD	#4,-2(R1)	; 4 pad bytes: keep the next 4-word
+		BIS	#6,-2(R1)	; element 8-byte aligned (the video
+		ADD	#4,R1		; controller masks links with ~7)
+20$:		SOB	R2,10$
+
+		MOV	R1,R3		; lines 241..259
+		ADD	#4,R3
+		JSR	R5,SET_LINES
+		.WORD	19.,80.
+		ADD	#4,-2(R1)	; pad + link: align the 4-word
+		BIS	#6,-2(R1)	; color-control element
+		ADD	#4,R1
+
+		MOV	R1,COLORS_DN1
+		CLR	(R1)+
+		MOV	R1,COLORS_DN2
+		CLR	(R1)+
+		MOV	R0,(R1)+	; line video address
+		ADD	#80.,R0
+		MOV	R1,R3
+		ADD	#2,R3
+		MOV	R3,@R1
+		BIS	#2,(R1)+	; next element: display control
+		CLR	(R1)+
+		MOV	R1,DN_MODE_ADDR
+		CLR	(R1)+
+		MOV	R0,(R1)+
+		ADD	#80.,R0
+		MOV	R1,R3
+		ADD	#2,R3
+		MOV	R3,(R1)+
+		MOV	R1,R3
+		ADD	#4,R3
+		JSR	R5,SET_LINES	; the remaining 27 lines
+		.WORD	27.,80.
+		RETURN
+
+ROWPAL_PTRS:	.BLKW	25.	; PPU addresses of the palette elements
+
+CLS_SCREEN_PP:	MOV	#177010,R0	; clear 288 lines (80 bytes each)
+		MOV	#177024,R1	; pixel octet register
+		MOV	#377,R2
+		CLR	@#177016	; pixel color - black
+		MOV	#100000,@R0
+		MOV	#11520.,R5
+1$:		MOV	R2,@R1
+		INC	@R0
+		MOV	R2,@R1
+		INC	@R0
+		SOB	R5,1$
+		RETURN
+
+SET_LINES:	MOV	(R5)+,R2	; line count
+1$:		MOV	R0,(R1)+	; video address
+		MOV	R3,(R1)+	; next table element
+		ADD	@R5,R0
+		ADD	#4,R3
+		SOB	R2,1$
+		TST	(R5)+
+		RTS	R5
+
+; restore the firmware video line table (COMMAND_1)
+OLD_TABLE:	MOV	#24.,@#22670
+		MOV	#2,@#22752	; enable scrolling
+		MOV	#27,@#2372
+		MOV	#21000,@#2400
+		MOV	#63104,@#2402
+		MOV	#175700,R0
+		MOV	#2410,R1
+		MOV	#2414,R3
+		JSR	R5,SET_LINES
+		.WORD	10.,40.
+
+		ADD	#2,-2(R1)
+		CLR	(R1)+
+		MOV	#7,(R1)+
+		MOV	#176520,(R1)+
+		MOV	#2476,(R1)+
+		MOV	#135230,(R1)+
+		MOV	#177334,(R1)+
+		MOV	#177460,(R1)+
+		MOV	#2500,(R1)+
+		MOV	#100000,R0
+		MOV	#2500,R1
+		MOV	#2504,R3
+		JSR	R5,SET_LINES
+		.WORD	286.,80.
+
+		MOV	#2500,-(R1)
+		MOV	#6742,@#4536
+		RETURN
+
+COMMAND_0:	CALL	CLS_SCREEN_PP	; clear screen + set mode
+SET_COLORS_PP:	MOV	#CPU_RGBPAL/2,@R0
+		MOV	@#177014,@#2372
+		RETURN
+
+COMMAND_4:	MOV	#177010,R0	; set colors without clearing
+		MOV	#177014,R1
+		MOV	#COLORWORD1/2,@R0
+		MOV	@R1,@#2400
+		INC	@R0
+		MOV	@R1,@#2402
+		INC	@R0
+		MOV	@R1,@(PC)+
+COLORS_DN1:	.WORD	0
+		INC	@R0
+		MOV	@R1,@(PC)+
+COLORS_DN2:	.WORD	0
+		INC	@R0
+		MOV	@R1,@#2372	; screen mode from CPU_RGBPAL
+		INC	@R0
+		MOV	@R1,@(PC)+
+DN_MODE_ADDR:	.WORD	0
+		RETURN
+
+RESET_COMP:	MTPS	#200
+		RESET
+		BIC	#20,@#177716
+		JMP	@#160300
+
+COMMAND_1:	CLR	PP_VSYNC_FLAG	; free resources
+		CALL	CLS_SCREEN_PP
+		CALL	OLD_TABLE
+		RETURN
+
+; set the 24 game-area row palettes from the CPU ROWPALS array
+; (24 x 2 words, same format as COLORWORD1/2)
+COMMAND_2:	MOV	#177010,R0
+		MOV	#ROWPALS/2,@R0	; CPU source, word address
+		MOV	PC,R2
+		ADD	#ROWPAL_PTRS-.,R2
+		MOV	#24.,R3
+1$:		MOV	(R2)+,R1	; palette element's color words
+		MOV	@#177014,(R1)+
+		INC	@R0
+		MOV	@#177014,(R1)
+		INC	@R0
+		SOB	R3,1$
+		RETURN
+
+; COMMAND_3 / COMMAND_5 are unused in this port (the game never needs
+; video plane 0, which only the PPU can reach - see port-plan.md).
+COMMAND_3:	RETURN
+COMMAND_5:	RETURN
+
+; K1 receiver: command dispatch from the CPU
+K1_PP:		MTPS	#340
+		MOV	@#177010,-(SP)
+		MOV	@#177016,-(SP)
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		MOV	R3,-(SP)
+		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+
+		MOVB	@#177062,R1	; command code
+		ASL	R1
+		MOV	PC,R2
+		ADD	#PP_COMMANDS-.,R2
+		ADD	R1,R2
+		CALL	@(R2)+
+
+		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+		MOV	(SP)+,R3
+		MOV	(SP)+,R2
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+
+		MOV	(SP)+,@#177016
+		MOV	#PP_BUSY/2,@#177010
+		MOV	PC,@#177014	; signal command completion
+		MOV	(SP)+,@#177010
+		RTI
+
+		.WORD	RESET_COMP
+PP_COMMANDS:	.WORD	COMMAND_0,COMMAND_1,COMMAND_2,COMMAND_3,COMMAND_4
+		.WORD	COMMAND_5,0
+
+; 50 Hz timer: publish keyboard word + vsync into CPU RAM
+PP_V100:	MOV	R0,-(SP)
+		MOV	@#177010,-(SP)
+		TST	(PC)+
+PP_VSYNC_FLAG:	.WORD	0
+		BEQ	0$
+		MOV	#KEYS_DATA/2,@#177010
+		MOV	PP_KEYS_STATE,@#177014
+		INC	@#177010
+		MOV	PC,@#177014	; vsync-ready flag
+0$:		TST	@#7130		; floppy motor running?
+		BEQ	1$
+		DEC	@#7130
+		BNE	1$
+		MOV	@#7132,R0
+		CALL	@R0		; stop the motor
+1$:
+		MOV	(SP)+,@#177010
+		MOV	(SP)+,R0
+		RTI
+
+PP_KEYB:	MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		MOV	PP_KEYS_STATE,R1
+		MOVB	@#177702,R0
+		BMI	PP_KEY_OFF	; bit 7 = release
+
+PP_KEY_ON:	MOV	PC,R2
+		ADD	#KEYON_CODES-.,R2
+1$:		CMP	(R2)+,R0
+		BEQ	2$
+		TST	(R2)+
+		BNE	1$
+		BR	SAVE_KEYCODES
+2$:		BIS	(R2)+,R1
+		BR	1$
+
+PP_KEY_OFF:	MOV	PC,R2
+		ADD	#KEYOFF_CODES-.,R2
+		BIC	#177600,R0
+KEYOFF_FIND:	CMP	(R2)+,R0
+		BEQ	KEY_OFF
+		TST	(R2)+
+		BNE	KEYOFF_FIND
+SAVE_KEYCODES:	MOV	R1,PP_KEYS_STATE
+		MOV	(SP)+,R2
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		RTI
+
+KEY_OFF:	BIC	(R2)+,R1
+		BR	KEYOFF_FIND
+
+PP_KEYS_STATE:	.WORD	0
+
+; key word bits: 0 up, 1 right, 2 down, 3 left, 4 ENTER, 5 FIKS
+; (P1 fire); 8..11 = same arrows for player 2, 13 = aux ENTER (P2
+; fire); 7 AP2, 15 STOP (pause)
+KEYON_CODES:	.WORD	4,100000	; STOP
+		.WORD	154,400+1	; UP
+		.WORD	133,2*400+2	; RIGHT
+		.WORD	134,4*400+4	; DOWN
+		.WORD	116,10*400+10	; LEFT
+		.WORD	153,20		; ENTER
+		.WORD	107,40		; FIKS (P1 fire)
+		.WORD	113,40		; space = P1 fire too
+		.WORD	166,40*400	; aux ENTER (P2 fire)
+		.WORD	6,200		; AP2
+		.WORD	0,0
+
+KEYOFF_CODES:	.WORD	4,100000	; STOP
+		.WORD	14,4*400+405	; UP+DOWN
+		.WORD	13,2*400+62	; RIGHT+ENTER+space
+		.WORD	16,10*400+10	; LEFT
+		.WORD	7,40		; FIKS
+		.WORD	6,40*400+200+40	; AP2 + aux ENTER
+		.WORD	0,0
+
+K1_SAVE:	.BLKW	1
+V100_SAVE:	.BLKW	1
+KEYB_SAVE:	.BLKW	1
+		.EVEN

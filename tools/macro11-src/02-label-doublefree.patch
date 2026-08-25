@@ -1,0 +1,11 @@
+--- /var/www/own/mc0511test/toolchain/assemble.c	2026-05-01 23:43:55.881166892 +0300
++++ tmp/macro11-src/assemble.c	2026-08-23 15:36:04.080757616 +0300
+@@ -263,6 +263,8 @@
+             cp = ncp;
+ 
+             free(label);               /* Don't need this hanging around anymore */
++            label = NULL;              /* the illegal-opcode fall-through at the
++                                          bottom frees it again otherwise */
+ 
+             switch (op->section->type) {
+             case SECTION_PSEUDO:

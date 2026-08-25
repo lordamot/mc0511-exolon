@@ -1,0 +1,7 @@
+# Anchored: these name the two top-level scratch directories, not any
+# directory that happens to be called "build" or "tmp" elsewhere.
+/build/
+/tmp/
+.idea/
+__pycache__/
+zesarux_index_menu.idx
