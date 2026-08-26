@@ -44,7 +44,11 @@ E.KIND	= 3.		; behaviour selector
 E.T1	= 4.		; per-kind counters
 E.T2	= 5.
 E.SIZE	= 6.
-NENT	= 24.		; entity slots
+NENT	= 48.		; entity slots.  The original keeps a separate list
+			; per kind (20 sparks, 24 energy balls, 10 shots, 3
+			; bullets); this port shares one, so it needs room
+			; for the worst case - a teleport's spark shower on
+			; top of a zone's two force fields.
 
 ; ---- live scenery object (built from the zone data) --------------
 O.X0	= 0.		; bounding box, x in 2-pixel units
@@ -54,7 +58,8 @@ O.Y1	= 3.
 O.COL	= 4.		; cell position
 O.ROW	= 5.
 O.OBJ	= 6.		; object id (behaviour)
-O.T	= 7.		; per-object timer
+O.T	= 7.		; per-object state (gun emplacements: the original's
+			; 0x9022 record - 0/1 idle, 9..2 the firing animation)
 O.SIZE	= 8.
 NOBJ	= 20.		; live objects per zone
 
@@ -71,6 +76,64 @@ OB_MINE	= 31.		; hovering mine
 OB_HOPPER = 40.		; hopper (spits at the player)
 OB_GUN	= 44.		; small gun emplacement
 OB_TREE	= 46.		; energy tree
+
+; ---- collision classes the display lists write --------------------
+; The original turns most of these into position lists at zone load
+; (0x8E86) and leaves only 0/1/3/13 in the map; this port keeps the
+; class in the cell and looks its behaviour up instead.  CLASS_BLOCK
+; in player.mac holds the same solid/passable split the original's
+; table at 0x8EF4 applies.
+; Objects 17 and 29 are the booths the two "press up" classes sit in.
+CL_TPORT = 6.		; teleport pad     (press up)
+CL_AMMO	= 7.		; ammunition canister (walk into)
+CL_GREN	= 8.		; grenade canister    (walk into)
+CL_FIELD = 9.		; force-field beam
+CL_SUIT	= 12.		; power-suit booth (press up)
+CL_MINE	= 13.		; mine
+NSPEC	= 2		; teleport pads / suit booths kept per zone
+
+; ---- pickup record (canisters, built at zone load) ----------------
+P.ROW	= 0.
+P.COL	= 2.
+P.OBJ	= 4.
+P.SIZE	= 6.
+NPICK	= 8.
+
+; ---- the rest of the live scenery ---------------------------------
+; The original picks a gun emplacement's moment to fire at random
+; (0x8FDA: fire when a random byte is >= 0xFA) rather than on a timer,
+; and the muzzle flash is eight frames of a two-cell tile animation
+; over the emplacement's own top-left cells (0x8FEC, tile base 0xDDD8 =
+; index 191 of this port's flat bank).
+GUN_FIRE = 250.		; random byte at or above this fires
+GUN_TILE = 191.		; port tile index of animation tile 0
+
+; The zone timer: after this many frames in one zone the original sends
+; a rocket in from the right at the player's height (0xAC59).
+ROCK_WAIT = 700.
+ROCK_X	= 120.		; where it comes in
+ROCK_STEP = -2		; and how fast it crosses (0xACA4: two DEC E)
+ROCK_SMOKE = 111.	; it only trails smoke once it is this far in
+
+; Energy balls: a force field emits this many, and they swirl inside its
+; ring until they are shot (0x9B07 / 0x9A23).  The original emits eight;
+; they overlap into one blob in the ring's two cells either way, and on
+; the UKNC each one costs about a tenth of a frame to move.
+BALLS	= 6.
+BALL_TURN = 220.	; a random byte at or above this reverses one
+
+; A mine keeps throwing homing missiles in from the right until it is
+; shot out (0xA23A / 0xA26B): one at a time, entering at a random
+; height, closing on the player's own height a pixel a frame, and
+; picking up speed once it is MINE_FAST from the right-hand edge.
+MINE_X	= 120.
+MINE_Y0	= 32.		; the band it can come in at
+MINE_YN	= 127.
+MINE_FAST = 70.
+
+; The teleport's spark shower (0x9ED9) and one spark's life (0x981D).
+TPFX_LEN = 20.
+SPARK_LEN = 10.
 
 ; ---- sound requests (SND_REQ) ------------------------------------
 SFX_SHOT = 1

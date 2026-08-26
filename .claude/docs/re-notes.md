@@ -110,6 +110,61 @@ canister** (0x9942: refills ammo to 99 and erases the canister with
 the list at 0x887E); object 20 is the **grenade canister** (refills
 grenades to 10, erase list at 0x888F).
 
+## Collision classes (0x8E86, table at 0x8EF4)
+
+Opcode `E8 n` in a display list stores `n` into the solid map for
+every cell it then paints, and the classes are how the game finds its
+furniture.  The zone loader post-processes the finished map at
+0x8E86: every cell whose class is >= 2 has its **position filed under
+that class** and the map byte replaced, so after loading the map holds
+only 0, 1, 3 and 13.  The table of 16 six-byte records at 0x8EF4 gives
+class 2..17 its list, the stride of an entry and the byte to leave in
+the map:
+
+| class | list | stride | left in map | what it is |
+|---|---|---|---|---|
+| 2 | 0x8F89 | 2 | 0 | animated detail |
+| 3 | 0x9022 | 3 | 3 | gun emplacement (solid) |
+| 4 | 0x9135 | 2 | 0 | booth / gantry frame (walk-through) |
+| 5 | 0x91B0 | 3 | 1 | animated solid |
+| 6 | 0x9930 | 2 | 1 | **teleport pad** |
+| 7 | 0x99F2 | 2 | 0 | **ammunition canister** |
+| 8 | 0x99F5 | 2 | 0 | **grenade canister** |
+| 9 | 0x9B4B | 2 | 0 | force-field beam |
+| 10 | 0x9C70 | 3 | 1 | animated solid |
+| 11 | 0x9DC1 | 2 | 0 | wall emitter (spits at the player) |
+| 12 | 0x9F6E | 2 | 1 | **power-suit booth** |
+| 13 | 0xA266 | 2 | 13 | mine |
+| 14 | 0xA333 | 3 | 0 | wall emitter, second half |
+| 15 | 0xA814 | 2 | 0 | animated detail |
+| 16 | 0xAAEF | 2 | 0 | animated detail |
+| 17 | 0xABCC | 2 | 1 | animated solid |
+
+The "left in map" column is the solid/passable split: the frames of a
+teleport booth and of the big gantries are class 4 and are meant to be
+walked through, while the pad itself and the suit booth's roof stay
+solid, which is what lets the same key both jump and operate them (see
+below).
+
+## Teleports (0x98BA) and the power suit (0x9F2D)
+
+Both are worked by **pressing up while standing in them**, and both
+have the same shape: an edge detector on the jump key (0x7B94, latched
+in 0x9935 / 0x9F6D), then
+
+    ld de,(pad) ; inc d ; call 0x9936   ; pad -> (x*4, (row+1)*8)
+    ld a,(0x82F6) ; cp d ; ret nz       ; player's top line must match
+    ld a,(0x82F5) ; sub e ; sub 9
+    cp 0xEB ; ret c                     ; and x within [-12, +8] of it
+
+The teleport (two pads, 0x9930 and 0x9932) then puts the player on the
+other one at `x = pad*4 - 3`; the suit booth XORs 0x0C into the suit
+frame offset at 0x9ED8.  Pressing up also starts a jump, but every
+booth has a solid roof over the pad, so the ceiling test at 0x8179
+cancels it before it moves the player - which is why the original can
+run both checks *after* the player update and still see him standing
+in the pad.  Object 17 is the teleport booth, object 29 the suit one.
+
 ## Player
 
 | Address | Meaning |
@@ -155,12 +210,33 @@ selected by `E & 3` - 0x76DA):
 
 Standing uses frame 5, jumping frame 3.  The 16x16 set (0xF8E0 +
 n*32, plotter 0x795C) holds explosions (0..9), missiles and rockets
-(10..15), energy balls (16..19) and the rest of the moving objects.
+(10..15), energy balls (16..19), the hunting rocket (36) and the rest
+of the moving objects.
+
+**The sheet has one facing.**  Every player frame draws Vitorc looking
+right, and the plotter at 0x76DA has no mirror path - it picks one of
+four pre-shift routines from `E & 3` and copies the shifted bytes
+straight out.  So the original never turns him round: walking left, he
+walks backwards.  (The port does turn him; see port-plan.md.)
+
+There is a second, quite separate sprite bank at **0xED40**: 16x8
+frames, each stored as four pre-shifted 16-byte copies (frame = 64
+bytes), drawn by the XOR plotter at 0x92FB.  It holds the grenade
+facing right and left (0, 1), three sizes of spark (3, 4, 5), a blank
+(6), the force fields' energy ball (7) and the wall emitters' shot (8).
+0x9E98 counts how many of these the frame has drawn and 0x9E85 pads the
+count out to sixteen with the blank, so the frame takes the same time
+however much is on screen; 0x9EAE/0x9E99 do the same for the 16x16
+plotter, to six.
 
 ## Bullets
 
 List of 3-byte records {E, D, step} at 0x845F, updated at 0x83DD and
-spawned at 0x8391.  The muzzle offset is +14 px in Y standing (+19
+spawned at 0x8391.  The update tests the **sprite-occupancy map**
+(0x9362 / 0x9382 through 0x80C1) and nothing else: a bolt kills the
+moving enemies and the shots in the air, and it never touches scenery.
+Gun emplacements and the rock formations that block a zone's exit are
+the grenade's job.  The muzzle offset is +14 px in Y standing (+19
 ducking) and +12 / -4 units in X depending on facing.  A bullet dies
 64 units to the right of the player or 52 to the left, or on hitting
 the solid map / an object.  Firing decrements ammo (0x8E5A).  Bullets
@@ -213,3 +289,118 @@ events for the UKNC beeper player.
     zx_control.py dump 0 65536 tmp/mem.bin
 
 Pressing `3` during play aborts to the menu (the check at 0xAD21).
+
+## The grenade (0x9208 spawn, 0x925F update, 0x93E2 blast)
+
+One at a time - 0x925A is both the "in flight" flag and the arc index -
+and only when the player is left of x = 0x76.  It leaves his shoulder,
+not his hip: x = player x + 4, y = player y (+6 crouching), and the
+facing (0x82FA) is both the x step, one unit an update, and the frame
+(0 right, 1 left) in the 16x8 bank.
+
+The arc is a table at 0x92DA read with the counter running 32 -> 1:
+
+    -4 -4 -2 -2 -2 -1 -1 -1 -1  0 x22  +1
+
+18 pixels up over nine steps, twenty-two level, and then +1 for ever -
+the counter sticks at 1, so a grenade that hits nothing keeps sinking
+until the ground stops it.  The main loop calls the update once a
+frame while the counter is >= 0x13 and three times a frame below that
+(the extra calls at 0x7604 and 0x761B), which is what makes the throw
+start as a lob and finish as a dart.  While the counter is >= 0x13 it
+also drops a spark four units behind itself every step (0x92C9), and
+that trail is the whole of its animation.
+
+It goes off at either edge of the zone, on the solid map ahead of it
+(0x9362 / 0x9382), on the floor below it (0x93A2, skipped on the
+arc's -1 steps) or below y = 0xA8.  0x93E2 then converts its position
+to a cell and walks the live object list at 0x9437 for a box that
+contains it: the first match is erased by replaying its display list
+with the plotter vector switched to the "clear" one (0x99F8 with A=3),
+flagged dead, and scored.  **Nothing else happens** - a grenade does
+not open holes in plain scenery.  What it is for is the objects a
+laser bolt cannot touch: the gun emplacements and the rock formations
+that block a zone's exit.
+
+## Sparks (0x981D spawn, 0x9835 animate)
+
+Twenty 3-byte slots at 0x9870: {x, y, counter}.  A spark starts with
+counter 10 and each frame draws the frame [0x9864 + counter] of the
+16x8 bank after erasing [0x9865 + counter], which was last frame's -
+the XOR plotter makes erase and draw the same operation.  The sequence
+is 3, 4, 5, 5, 3, 5, 4, 5, 5, blank, so it twinkles rather than fades.
+Nothing collides with a spark.
+
+## Gun emplacements (class 3, list 0x9022, handler 0x8F95)
+
+A 3-byte record per emplacement, {col, row, state}, sitting on the
+object's own top-left cell.  It is neither aimed nor timed: in state 1
+it draws a random byte every frame and fires when the byte is >= 0xFA,
+about one frame in forty, and the shot always goes **left**, the side
+the player comes from (0x9071 spawns it at y = row*8+3, x = col*4 with
+step -1; 0x90A2 flies it, twice a frame).
+
+Firing sets the state to 9, and states 9 down to 2 are the recoil: each
+frame XORs out the tile pair the previous state used and XORs in the
+pair for this one, over the emplacement's two anchor cells, from the
+table at 0x9018 (tile 0x10 at rest, then 0x1E, 0x1C, 0x1A, 0x18, 0x16,
+0x14, 0x12 and back to 0x10) with the tile base at 0xDDD8.  State 0
+means the emplacement has been destroyed, which 0x8FB5 notices by
+finding something other than 3 left in the solid map.
+
+## The teleport's spark shower (0x9ED9 spawn, 0x9EEE animate)
+
+Four 3-byte emitters at 0x9F13.  The teleport (0x98BA) starts one on
+the pad it leaves and one on the pad it lands on, each with counter 20;
+every frame each surviving emitter throws one spark at a random offset
+inside four pixels by sixteen above its pad.  The warp itself is
+instant - the shower is what reads as the travelling time.
+
+## Force fields and their energy balls (0x9B07, 0x9A23)
+
+Object 21's display list writes class 9 into one cell inside its ring
+(and 0 into the rest of the hollow, 1 into the ring itself), so the
+zone loader's class scan files that cell in the list at 0x9B4B and
+leaves the map passable there.  0x9B07 then gives every entry **eight**
+balls, all at the same point - x = col*4 + 2, y = row*8 + 3 - each with
+a random step of +1 or -1, in the 24 four-byte slots at 0x9A99.
+
+0x9A23 moves them: the step reverses at either edge of the zone, on
+anything solid ahead (0x9362 / 0x9382) or on a random byte >= 0xDC,
+about one frame in seven, and y wanders a pixel up or down each frame
+unless 0x93A2 / 0x93C2 says the cell that way is solid.  The ring's own
+cells are solid, so they swirl inside it.  They are drawn as frame 7 of
+the 16x8 bank; 0x9B52 lets a laser bolt pop one for points and 0x9BB4
+kills the player who touches one.
+
+## Mines (class 13, 0xA23A launch, 0xA26B fly)
+
+Object 31 writes class 13 on its anchor cell, and the class stays 13 in
+the map.  A zone has one mine's worth of state - the cell at 0xA266,
+the missile at 0xA268, the flag at 0xA26A - and 0xA23A relaunches as
+soon as the last missile is gone, as long as that cell still reads 13:
+x = 0x78, y = a random 0x20..0x9F.  0xA26B flies it left one unit a
+frame down to x = 0x46 and two after that (16x16 frames 10 and 11),
+moving one pixel a frame towards the player's own y, and kills him on a
+16-by-8 box.  Shooting the mine out is the only way to stop them; the
+missiles themselves cannot be shot down.
+
+## The rocket for a player who lingers (0xAC59, 0xAC7D)
+
+0xAC7B counts frames since the zone was loaded (0x7682), and is reset
+by the zone loader (0x8497) and by death (0x9CBE).  At **700** frames
+0xAC59 arms a rocket at x = 0x78 and whatever y the player is at, and
+0xAC7D flies it left two units a frame as 16x16 frame 36, dropping a
+spark at (x+6, y+4) on about half the frames once x is below 0x6F.  It
+kills on a 16-by-8 box and disarms itself at x = 0, so there is exactly
+one per visit to a zone - staying put simply gets you killed.
+
+## Box tests against the player (0x9BD6)
+
+BC carries the box: C = its width in x units, B = its height in
+pixels.  It hits when the player's x is within [-12, C-1] of the
+entity's and his y within [-32, B-1] of it, the 12 and the 32 being
+the player sprite's own size; crouching takes a different y branch.
+The numbers the callers pass are 0x0804 for an energy ball or a wall
+emitter's shot (4 units by 8 pixels) and 0x1008 for a mine's missile
+and the hunting rocket (16 by 8).

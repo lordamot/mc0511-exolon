@@ -240,16 +240,33 @@ def write_tiles(mem, path):
     path.write_text("\n".join(out))
 
 
-# The original has no sprite for the player's own laser bolt or for a
-# grenade in flight (it drew both as bare patterns), so the port adds
-# them in two of the sheet's unused frames.
+# The original draws the grenade, the sparks and the force field's energy
+# balls from a second, 16x8 pre-shifted bank at 0xED40 that has nothing to
+# do with the 16x16 sheet (plotter 0x92FB), and it has no sprite at all for
+# the player's own laser bolt.  The port has one sprite format for all of
+# them, so those frames are copied into the sheet's unused slots, in the
+# sheet's own bit order, and the port's entity code names them there.
+SMALL_BANK = 0xED40             # 16x8 frames, 4 pre-shifts of 16 bytes each
+SMALL_BANK_FRAMES = {           # sheet frame -> bank frame
+    46: 0,                      # grenade flying right
+    47: 1,                      # grenade flying left
+    48: 7,                      # a force field's energy ball
+    49: 3,                      # spark, three sizes (0x9864 picks between
+    50: 4,                      # them as the spark's counter runs out)
+    51: 5,
+}
+
 EXTRA_SMALL = {
     45: ["." * 16] * 7 + ["..############..", "..############.."]
         + ["." * 16] * 7,
-    46: ["." * 16] * 5 + ["......####......", ".....######.....",
-                          ".....######.....", ".....######.....",
-                          "......####......"] + ["." * 16] * 6,
 }
+
+
+def bank_frame(mem, n):
+    """One 16x8 frame of the second sprite bank, padded to 16x16."""
+    a = SMALL_BANK + n * 64     # shift 0 of the four pre-shifted copies
+    return [bits(mem[a + y * 2]) + bits(mem[a + y * 2 + 1])
+            for y in range(8)] + ["." * 16] * 8
 
 
 def write_sprites(mem, path, org, count, w, h, title, extra=None):
@@ -286,6 +303,13 @@ PAUSED|PAUSED
 """
 
 
+def small_extra(mem):
+    out = dict(EXTRA_SMALL)
+    for frame, n in SMALL_BANK_FRAMES.items():
+        out[frame] = bank_frame(mem, n)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--force", action="store_true")
@@ -308,8 +332,8 @@ def main():
         RES / "sprites/small.txt": lambda p: write_sprites(
             mem, p, SMALL_ORG, SMALL_FRAMES, SMALL_W, SMALL_H,
             "16x16 sprites (0..9 explosion, 10..15 rockets and missiles, "
-            "16..19 energy balls, 45 the player's bolt, 46 a grenade)",
-            EXTRA_SMALL),
+            "16..19 energy balls, 36 the rocket that hunts a player who\n; lingers, 45 the player's bolt, 46/47 a grenade, 48 an energy ball,\n; 49..51 sparks)",
+            small_extra(mem)),
         RES / "text/strings.txt": lambda p: p.write_text(STRINGS),
     }
     for path, fn in targets.items():

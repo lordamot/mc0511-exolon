@@ -24,6 +24,8 @@ KEYS:		.BLKW	1	; debounced key word for this frame
 KEYPREV:	.BLKW	1
 
 ; ---- zone -------------------------------------------------------
+RNDSEED:	.BLKW	1	; 16-bit LFSR behind RANDOM
+ROCKACT:	.BLKW	1	; the lingering-player rocket is in the air
 ZONE:		.BLKW	1	; current zone 0..124
 ZONELOAD:	.BLKW	1	; nonzero = (re)load the zone this frame
 NLIVE:		.BLKW	1	; live scenery objects in OBJLIST
@@ -67,8 +69,32 @@ ENTS:		.BLKB	E.SIZE*NENT
 OBJLIST:	.BLKB	O.SIZE*NOBJ
 		.EVEN
 
+; ---- zone specials, built by ZONE_LOAD ---------------------------
+NTPORT:		.BLKW	1	; teleport pads in this zone (0..NSPEC)
+TPROW:		.BLKW	NSPEC	; cell of each pad (the CL_TPORT cell)
+TPCOL:		.BLKW	NSPEC
+NSUITP:		.BLKW	1	; power-suit booths (0..NSPEC)
+SUITROW:	.BLKW	NSPEC
+SUITCOL:	.BLKW	NSPEC
+NMINE:		.BLKW	1	; the zone has a mine throwing missiles
+MINEROW:	.BLKW	1	; and the cell it is anchored in
+MINECOL:	.BLKW	1
+NPICKUP:	.BLKW	1	; canisters placed in this zone
+PICKS:		.BLKB	P.SIZE*NPICK
+		.EVEN
+
 ; ---- scratch ----------------------------------------------------
+ENTW:		.BLKW	1	; entity box for ENT_HITPLAYER, x units
+ENTH:		.BLKW	1	; and pixels
+REVTAB:		.BLKB	256.	; byte -> its bits reversed (REV_INIT builds
+				; both): mirrors the player when he faces left
+DUPTAB:		.BLKW	256.	; byte -> the same byte in both halves of a
+				; word, one pixel row of a two-plane sprite
 SPRSHIFT:	.BLKW	1
+SPRMIR:		.BLKW	1	; nonzero = draw the frame mirrored
+SPRH:		.BLKW	1	; lines of a 16x16 frame to draw (0 = all)
+SPRC:		.BLKW	1	; cells it may touch across   (0 = all)
+SPRB0:		.BLKW	1	; scratch for the mirror
 SPRNOT:		.BLKW	1	; planes the sprite must not light
 SPRY:		.BLKW	1
 SPRSRC:		.BLKW	1

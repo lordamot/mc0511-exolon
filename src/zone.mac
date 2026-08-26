@@ -17,7 +17,11 @@ ZONE_LOAD:	CLR	ZONELOAD
 		CLR	FRAMECNT
 		CALL	CELLS_CLEAR
 		CLR	NLIVE
-		CALL	ENTS_CLEAR
+		CLR	NPICKUP
+		CLR	NTPORT
+		CLR	NSUITP
+		CLR	NMINE
+		CALL	ENTS_CLEAR	; also disarms the zone's rocket
 		MOV	ZONE,R0
 		ASL	R0
 		MOV	ZONE_TAB(R0),R5
@@ -36,6 +40,8 @@ ZONE_LOAD:	CLR	ZONELOAD
 		MOV	R5,-(SP)
 		MOV	R0,-(SP)
 		CALL	OBJ_REGISTER		; live object?
+		MOV	@SP,R0
+		CALL	PICK_REGISTER		; canister?
 		MOV	(SP)+,R0
 		MOV	#8.,LINK		; ZX ink 7 + 1
 		CLR	LBASE
@@ -49,7 +55,8 @@ ZONE_LOAD:	CLR	ZONELOAD
 		MOV	(SP)+,R5
 		BR	10$
 
-20$:		CALL	HUD_INIT
+20$:		CALL	SPEC_SCAN		; teleport pads, suit booths
+		CALL	HUD_INIT
 		CALL	ROW_PALETTES
 		MOV	#2,R0			; PPU: reload the row palettes
 		CALL	SEND_PP_COMM
@@ -104,6 +111,113 @@ OBJ_REGISTER:	CMP	NLIVE,#NOBJ
 9$:		RETURN
 
 ; ------------------------------------------------------------------
+; Canisters are not in the box table, so they are not live objects,
+; but taking one has to wipe out the whole thing the way the original
+; does (it replays the object's erase list at 0x887E / 0x888F).  Note
+; where each one was placed; PL_TAKE looks the cell up here.
+; LROW / LCOL hold the placement.  Preserves R0.
+PICK_REGISTER:	CMP	R0,#OB_AMMO
+		BEQ	1$
+		CMP	R0,#OB_AMMO2
+		BEQ	1$
+		CMP	R0,#OB_GREN
+		BEQ	1$
+		RETURN
+1$:		CMP	NPICKUP,#NPICK
+		BHIS	9$
+		MOV	NPICKUP,R1
+		MOV	R1,R2
+		ASL	R2
+		ASL	R2
+		ADD	R1,R2
+		ADD	R1,R2			; *P.SIZE
+		ADD	#PICKS,R2
+		MOV	LROW,P.ROW(R2)
+		MOV	LCOL,P.COL(R2)
+		MOV	R0,P.OBJ(R2)
+		INC	NPICKUP
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; The original scans the finished collision map at 0x8E86 and turns
+; every special class into a list of cell positions.  This port keeps
+; the classes where they are, but the two that the player operates by
+; pressing up - the teleport pads and the power-suit booths - still
+; need their positions, so collect those.
+SPEC_SCAN:	CLR	R1			; how many force fields first,
+		CLR	R4			; so they can share one budget
+6$:		CLR	R3
+7$:		MOV	R4,R0
+		MOV	R1,-(SP)
+		MOV	R3,R1
+		CALL	CELLADDR
+		MOVB	C.SOLID(R2),R0
+		BIC	#177400,R0
+		MOV	(SP)+,R1
+		CMP	R0,#CL_FIELD
+		BNE	8$
+		INC	R1
+8$:		INC	R3
+		CMP	R3,#NCOLS
+		BLO	7$
+		INC	R4
+		CMP	R4,#PLAYROWS
+		BLO	6$
+		CALL	BALL_SHARE
+
+		CLR	R4			; row
+1$:		CLR	R3			; column
+2$:		MOV	R4,R0
+		MOV	R3,R1
+		CALL	CELLADDR
+		MOVB	C.SOLID(R2),R0
+		BIC	#177400,R0
+		CMP	R0,#CL_TPORT
+		BNE	3$
+		CMP	NTPORT,#NSPEC
+		BHIS	5$
+		MOV	NTPORT,R2
+		ASL	R2
+		MOV	R4,TPROW(R2)
+		MOV	R3,TPCOL(R2)
+		INC	NTPORT
+		BR	5$
+3$:		CMP	R0,#CL_SUIT
+		BNE	9$
+		CMP	NSUITP,#NSPEC
+		BHIS	5$
+		MOV	NSUITP,R2
+		ASL	R2
+		MOV	R4,SUITROW(R2)
+		MOV	R3,SUITCOL(R2)
+		INC	NSUITP
+		BR	5$
+9$:		CMP	R0,#CL_MINE	; a mine, which throws missiles in
+		BNE	4$		; from the right until it is shot out
+		TST	NMINE
+		BNE	5$
+		MOV	R4,MINEROW
+		MOV	R3,MINECOL
+		MOV	#1,NMINE
+		BR	5$
+4$:		CMP	R0,#CL_FIELD	; a force field starts its energy
+		BNE	5$		; balls drifting (0x9B07)
+		MOV	R4,-(SP)
+		MOV	R3,-(SP)
+		MOV	R4,R0
+		MOV	R3,R1
+		CALL	BALL_EMIT
+		MOV	(SP)+,R3
+		MOV	(SP)+,R4
+5$:		INC	R3
+		CMP	R3,#NCOLS
+		BLO	2$
+		INC	R4
+		CMP	R4,#PLAYROWS
+		BLO	1$
+		RETURN
+
+; ------------------------------------------------------------------
 ; Run display list R0 at cell (R1 = row, R2 = column) with the usual
 ; starting state.  Clobbers everything.
 RUN_LIST:	MOV	R1,LROW
@@ -118,6 +232,24 @@ RUN_LIST:	MOV	R1,LROW
 		MOV	LIST_TAB(R0),R4
 		ADD	#LISTS,R4
 		CALL	LIST_RUN
+		RETURN
+
+; ------------------------------------------------------------------
+; Replay display list R0 at cell (R1 = row, R2 = column) in erase
+; mode: exactly the cells it painted go blank.  Clobbers everything.
+ERASE_LIST:	MOV	R1,LROW
+		MOV	R2,LCOL
+		MOV	#8.,LINK
+		CLR	LBASE
+		MOV	#1,LSOLID
+		CLR	LHIT
+		CLR	LSTKP
+		MOV	#1,LERASE
+		ASL	R0
+		MOV	LIST_TAB(R0),R4
+		ADD	#LISTS,R4
+		CALL	LIST_RUN
+		CLR	LERASE
 		RETURN
 
 ; ------------------------------------------------------------------
@@ -281,16 +413,20 @@ ROWTMP:		.WORD	0
 ; big object keeps it and the sprite settles for the nearest colour.
 ; Rows above 8 are sky: the player never reaches them, so they are
 ; left alone and the planets keep their own inks.
-WHITE_SLOT3:	CMP	ROWTMP,#8.	; the sky is out of the player's
-		BLO	9$		; reach, so it keeps all its colours
+WHITE_SLOT3:	CMPB	ROWPAL3,#15.	; already there: nothing to do
+		BEQ	9$
+		CMPB	ROWPAL3+1,#15.
+		BEQ	9$
 		CMPB	ROWPAL3+2,#15.
 		BEQ	9$
-		MOV	ROWW3+4,R0
-		ASL	R0
+		CMP	ROWTMP,#8.	; a playfield row always gives white
+		BHIS	1$		; up, so the player is white wherever
+		MOV	ROWW3+4,R0	; he walks or jumps; the sky keeps its
+		ASL	R0		; inks unless the third one is a detail
 		ASL	R0
 		CMP	R0,ROWWTOT
 		BHIS	9$
-		MOVB	#15.,ROWPAL3+2
+1$:		MOVB	#15.,ROWPAL3+2
 9$:		RETURN
 
 ; ------------------------------------------------------------------

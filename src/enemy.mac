@@ -5,7 +5,6 @@
 ; by the object id (the same ids the zone data uses).
 ; ------------------------------------------------------------------
 
-CANNON_RATE = 70.	; frames between shots
 ROCKET_RATE = 90.
 DISH_RATE = 110.
 HOPPER_RATE = 60.
@@ -23,32 +22,59 @@ ENEMY_UPD:	TST	NLIVE
 		SOB	R4,1$
 9$:		RETURN
 
-; one object: R5 = record
-ENEMY_ONE:	MOVB	O.OBJ(R5),R0
+; one object: R5 = record (kept in ECUR_OBJ as well - drawing a frame
+; of the recoil goes through the cell and blit helpers, which keep no
+; registers at all)
+ECUR_OBJ:	.WORD	0
+ENEMY_ONE:	MOV	R5,ECUR_OBJ
+		MOVB	O.OBJ(R5),R0
 		BIC	#177400,R0
 		BIT	#200,R0
 		BNE	9$			; destroyed
 		CMP	R0,#OB_CANNON
-		BEQ	EO_CANNON
+		BEQ	1$
 		CMP	R0,#OB_GUN
-		BEQ	EO_CANNON
-		CMP	R0,#OB_ROCKET
-		BEQ	EO_ROCKET
-		CMP	R0,#OB_DISH
-		BEQ	EO_DISH
-		CMP	R0,#OB_HOPPER
-		BEQ	EO_HOPPER
+		BNE	2$
+1$:		JMP	EO_CANNON
+2$:		CMP	R0,#OB_ROCKET
+		BNE	3$
+		JMP	EO_ROCKET
+3$:		CMP	R0,#OB_DISH
+		BNE	4$
+		JMP	EO_DISH
+4$:		CMP	R0,#OB_HOPPER
+		BNE	9$
+		JMP	EO_HOPPER
 9$:		RETURN			; rocks, trees, mines: contact only
 
 ; ------------------------------------------------------------------
-; A cannon fires horizontally at the player when he is roughly level
-; with the muzzle and on the side the barrel points to.
-EO_CANNON:	INCB	O.T(R5)
-		CMPB	O.T(R5),#CANNON_RATE
+; A gun emplacement, the original's class 3 (list 0x9022, handler
+; 0x8F95).  It is not aimed and it is not on a timer: it fires down its
+; own row, always to the left - the side the player comes from - as soon
+; as a random byte comes up at or above GUN_FIRE, and then plays eight
+; frames of recoil over its own top two cells.
+;
+; O.T is the original's state byte.  0 and 1 are idle; 9 down to 2 walk
+; the muzzle back out through GUNSEQ, which holds the tile 0x8FEC picks
+; for each state (offsets into the animation set the original bases at
+; 0xDDD8 - index GUN_TILE of this port's flat bank).  Each frame draws
+; the tile and the one after it, side by side.
+GUNSEQ:		.BYTE	0		; (state 0: destroyed)
+		.BYTE	16.		; 1: at rest
+		.BYTE	18.,20.,22.,24.	; 2..5
+		.BYTE	26.,28.,30.	; 6..8
+		.BYTE	16.		; 9: the frame the shot leaves on
+		.EVEN
+
+EO_CANNON:	MOVB	O.T(R5),R0
+		BIC	#177400,R0
+		CMP	R0,#1
+		BHI	EO_GUNANIM
+		CALL	RANDOM
+		CMP	R0,#GUN_FIRE
 		BLO	9$
-		CLRB	O.T(R5)
-		CALL	EO_LEVEL		; player within +/- 1 row?
-		BEQ	9$
+		MOV	ECUR_OBJ,R5
+		MOVB	#9.,O.T(R5)
 		MOVB	O.COL(R5),R1
 		BIC	#177400,R1
 		ASL	R1
@@ -57,18 +83,66 @@ EO_CANNON:	INCB	O.T(R5)
 		BIC	#177400,R2
 		ASL	R2
 		ASL	R2
-		ASL	R2			; muzzle y in pixels
-		MOV	#-2,R4			; fire towards the player
-		CMP	PX,R1
-		BLE	1$
-		MOV	#2,R4
-		ADD	#12.,R1
-		BR	2$
-1$:		SUB	#8.,R1
-		BLT	9$
-2$:		MOV	#EK_SHOT,R0
+		ASL	R2
+		ADD	#3,R2			; muzzle line: the barrel's row.
+						; A standing player's head is in
+						; it, a crouching one's is not.
+		MOV	#-2,R4			; the original always fires left
+		MOV	#EK_SHOT,R0
 		CALL	ENT_SPAWN
 		MOV	#SFX_SHOT,SND_REQ
+9$:		RETURN
+
+; one frame of the recoil: state R0 draws GUNSEQ[state-1] and the tile
+; next to it over the emplacement's own two anchor cells
+EO_GUNANIM:	DEC	R0
+		MOVB	R0,O.T(R5)
+		MOVB	GUNSEQ(R0),R0
+		BIC	#177400,R0
+		ADD	#GUN_TILE,R0
+		MOV	R0,GUNT
+		MOVB	O.ROW(R5),R0
+		BIC	#177400,R0
+		MOV	R0,GUNROW
+		MOVB	O.COL(R5),R0
+		BIC	#177400,R0
+		MOV	R0,GUNCOL
+		MOV	GUNROW,R0
+		MOV	GUNCOL,R1
+		MOV	GUNT,R4
+		CALL	CELL_TILE
+		MOV	GUNROW,R0
+		MOV	GUNCOL,R1
+		INC	R1
+		MOV	GUNT,R4
+		INC	R4
+		CALL	CELL_TILE
+		MOV	GUNROW,R0
+		MOV	GUNCOL,R1
+		MOV	#2,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	GUNROW,R0
+		MOV	GUNCOL,R1
+		MOV	#2,R2
+		MOV	#1,R3
+		CALL	MARK_RECT
+		RETURN
+
+GUNT:		.WORD	0
+GUNROW:		.WORD	0
+GUNCOL:		.WORD	0
+
+; Put tile R4 into cell (R0, R1), leaving its ink and its collision
+; class alone: the emplacement's colour and its solid cells must not
+; change while it recoils.
+CELL_TILE:	CMP	R0,#NROWS
+		BHIS	9$
+		CMP	R1,#NCOLS
+		BHIS	9$
+		MOV	R4,-(SP)
+		CALL	CELLADDR
+		MOV	(SP)+,@R2
 9$:		RETURN
 
 ; ------------------------------------------------------------------
@@ -94,7 +168,7 @@ EO_ROCKET:	INCB	O.T(R5)
 		CMP	PX,R1
 		BLE	1$
 		MOV	#1,R4
-1$:		MOV	#EK_SHOT,R0
+1$:		MOV	#EK_MISL,R0
 		CALL	ENT_SPAWN
 		MOV	#SFX_SHOT,SND_REQ
 9$:		RETURN
@@ -130,7 +204,7 @@ EO_AIMED:	MOVB	O.COL(R5),R1
 		BLE	1$
 		MOV	#1,R4
 		ADD	#8.,R1
-1$:		MOV	#EK_SHOT,R0
+1$:		MOV	#EK_MISL,R0
 		CALL	ENT_SPAWN
 9$:		RETURN
 

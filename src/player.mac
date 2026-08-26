@@ -42,13 +42,13 @@ PLAYER_UPD:	TST	PDEAD
 		JMP	PL_DYING
 1$:		CALL	PL_READDIR	; R5 = -1 / 0 / +1
 		MOV	R5,PSTEP
+		CLR	PDUCK		; only the ground branch below sets it
 		TST	PFALL
 		BNE	PL_FALLING
 		TST	PJUMP
 		BNE	PL_JUMPING
 		CALL	PL_FLOOR
 		BEQ	PL_FALLING
-		CLR	PDUCK
 		MOV	#K_DOWN,R0	; crouching stops everything else
 		CALL	KEY_HELD
 		BEQ	2$
@@ -193,7 +193,7 @@ PL_COLUMN:	MOV	R1,PCCOL
 2$:		MOV	PCROW,R0
 		MOV	PCCOL,R1
 		MOV	R2,-(SP)
-		CALL	MAP_CLASS
+		CALL	MAP_BLOCK
 		MOV	(SP)+,R2
 		BIS	R0,PCACC
 		INC	PCROW
@@ -226,7 +226,7 @@ PL_FLOOR:	MOV	PY,R0
 2$:		MOV	PCROW,R0
 		MOV	PCCOL,R1
 		MOV	R2,-(SP)
-		CALL	MAP_CLASS
+		CALL	MAP_BLOCK
 		MOV	(SP)+,R2
 		BIS	R0,PCACC
 		INC	PCCOL
@@ -256,7 +256,7 @@ PL_CEIL:	MOV	PY,R0
 1$:		MOV	PCROW,R0
 		MOV	PCCOL,R1
 		MOV	R2,-(SP)
-		CALL	MAP_CLASS
+		CALL	MAP_BLOCK
 		MOV	(SP)+,R2
 		BIS	R0,PCACC
 		INC	PCCOL
@@ -288,67 +288,124 @@ MAP_CLASS:	CMP	R0,#NROWS
 		RETURN
 
 ; ------------------------------------------------------------------
+; Does cell (R0, R1) stop movement?  R0 = 0 when it does not.
+;
+; Only some of the classes a display list writes are walls.  The
+; original decides this at zone load (the table at 0x8EF4 replaces
+; every special class in the map with 0 or 1 and files the cell's
+; position under the class instead); BLOCKTAB is that same split, kept
+; as a lookup so the class itself survives for PL_TRIGGERS.  Getting
+; it wrong is what walled the player out of the teleport booths: their
+; frames are class 4, which the original makes walk-through.
+BLOCKTAB:	.BYTE	0,1,0,1,0,1,1,0	;  0.. 7
+		.BYTE	0,0,1,0,1,1,0,0	;  8..15
+		.BYTE	0,1		; 16..17
+		.EVEN
+BLOCKMAX = 18.
+
+MAP_BLOCK:	CALL	MAP_CLASS
+CLASS_BLOCK:	TST	R0
+		BEQ	9$
+		CMP	R0,#BLOCKMAX
+		BHIS	8$
+		MOVB	BLOCKTAB(R0),R0
+		BIC	#177400,R0
+		RETURN
+8$:		MOV	#1,R0		; an unknown class holds
+9$:		RETURN
+
+; ------------------------------------------------------------------
 ; Pickups and hazards: scan the four cell rows and four columns the
-; player's body covers for a special collision class.  1 and 2 are
-; plain scenery, everything else means something.
+; player's body covers for a special collision class.  0..2 are plain
+; scenery, everything else means something.  The loop counters live in
+; memory because acting on a cell (PL_TAKE) runs the whole cell and
+; blit machinery, which keeps nothing.
 PL_TRIGGERS:	MOV	PY,R0
 		ASR	R0
 		ASR	R0
 		ASR	R0
 		MOV	R0,PCROW
-		MOV	#4,R3
+		MOV	#4,PTRI
 1$:		MOV	PX,R1
 		ASR	R1
 		ASR	R1
 		MOV	R1,PCCOL
-		MOV	#4,R2
+		MOV	#4,PTCI
 2$:		MOV	PCROW,R0
 		MOV	PCCOL,R1
-		MOV	R2,-(SP)
-		MOV	R3,-(SP)
 		CALL	MAP_CLASS
-		MOV	(SP)+,R3
-		MOV	(SP)+,R2
 		CMP	R0,#2
 		BLOS	3$
 		MOV	PCROW,R4
 		MOV	PCCOL,R5
 		CALL	PL_TRIGGER1
 3$:		INC	PCCOL
-		SOB	R2,2$
+		DEC	PTCI
+		BNE	2$
 		INC	PCROW
-		SOB	R3,1$
+		DEC	PTRI
+		BNE	1$
 		RETURN
 
+PTRI:		.WORD	0
+PTCI:		.WORD	0
+PKROW:		.WORD	0
+PKCOL:		.WORD	0
+
 ; act on class R0 at cell (R4, R5)
-PL_TRIGGER1:	CMP	R0,#7		; ammunition canister
+PL_TRIGGER1:	CMP	R0,#CL_AMMO	; ammunition canister
 		BNE	10$
 		MOV	#99.,AMMO
 		BR	PL_TAKE
-10$:		CMP	R0,#8.		; grenade canister
-		BNE	20$
+10$:		CMP	R0,#CL_GREN	; grenade canister
+		BNE	30$
 		MOV	#10.,GRENADES
 		BR	PL_TAKE
-20$:		CMP	R0,#11.		; power-suit pod
-		BNE	30$
-		MOV	#12.,PSUIT
-		BR	PL_TAKE
-30$:		CMP	R0,#13.		; a mine goes off on contact
+30$:		CMP	R0,#CL_MINE	; a mine goes off on contact
 		BEQ	40$
-		CMP	R0,#5		; force fields, beams, plants
+		CMP	R0,#5		; animated solids that kill (0x9186)
 		BEQ	40$
-		CMP	R0,#6
-		BEQ	40$
-		CMP	R0,#9.
-		BEQ	40$
-		CMP	R0,#12.
-		BEQ	40$
-		RETURN
+		RETURN			; CL_FIELD is harmless in itself - the
+					; original leaves 0 in the map for it
+					; and lets the balls it emits do the
+					; killing (see BALL_EMIT)
 40$:		JMP	PLAYER_KILL
 
-; take the cell at (R4, R5): clear it and redraw it
+; Take the canister that owns cell (R4, R5).  The original erases the
+; whole thing by replaying its display list (0x887E / 0x888F); do the
+; same, so nothing of it is left standing.  The class cell is the
+; object's own anchor, one of its top two cells.
 PL_TAKE:	MOV	#SFX_PICK,SND_REQ
-		MOV	R4,R0
+		MOV	#1,HUDDIRTY
+		MOV	NPICKUP,R0
+		BEQ	8$
+		MOV	#PICKS,R1
+1$:		CMP	P.COL(R1),R5
+		BNE	2$
+		CMP	P.ROW(R1),R4
+		BEQ	3$
+2$:		ADD	#P.SIZE,R1
+		SOB	R0,1$
+		BR	8$
+3$:		MOV	R1,R2			; erase it, cell for cell
+		MOV	P.OBJ(R2),R0
+		MOV	P.ROW(R2),R1
+		MOV	P.COL(R2),R2
+		MOV	R1,PKROW
+		MOV	R2,PKCOL
+		CALL	ERASE_LIST
+		MOV	PKROW,R0
+		MOV	PKCOL,R1
+		MOV	#6,R2
+		MOV	#3,R3
+		CALL	CELL_RECT
+		MOV	PKROW,R0
+		MOV	PKCOL,R1
+		MOV	#6,R2
+		MOV	#3,R3
+		CALL	MARK_RECT
+		RETURN
+8$:		MOV	R4,R0			; not in the list: just this cell
 		MOV	R5,R1
 		CALL	CELLADDR
 		CLRB	C.SOLID(R2)
@@ -363,8 +420,134 @@ PL_TAKE:	MOV	#SFX_PICK,SND_REQ
 		MOV	#1,R2
 		MOV	#1,R3
 		CALL	MARK_RECT
-		MOV	#1,HUDDIRTY
 		RETURN
+
+; ------------------------------------------------------------------
+; The two things the player operates by pressing up while standing in
+; them: the teleport pads (0x98BA) and the power-suit booth (0x9F2D).
+; Both booths have a solid roof, so the jump the same key starts is
+; cancelled by the ceiling test before it moves him - which is exactly
+; how the original gets away with running this after the player.
+;
+; A pad matches when the player's top line is one cell row below the
+; pad's cell and he stands within [-12, +8] units of it.
+PL_SPECIAL:	TST	PDEAD
+		BNE	9$
+		MOV	#K_UP,R0
+		CALL	KEY_EDGE
+		BEQ	9$
+		MOV	NTPORT,R0	; both pads present?
+		CMP	R0,#2
+		BLO	5$
+		CLR	R0
+		CALL	PL_ONPAD
+		BEQ	1$
+		CLR	PL_FROM
+		MOV	#1,R0		; standing on the first: go to the other
+		CALL	PL_WARP
+		RETURN
+1$:		MOV	#1,R0
+		CALL	PL_ONPAD
+		BEQ	5$
+		MOV	#1,PL_FROM
+		CLR	R0
+		CALL	PL_WARP
+		RETURN
+5$:		MOV	NSUITP,R2	; power-suit booth
+		BEQ	9$
+		CLR	R3
+6$:		MOV	R3,R0
+		ASL	R0
+		MOV	SUITROW(R0),R1
+		MOV	SUITCOL(R0),R0
+		CALL	PL_ATCELL
+		BNE	7$
+		INC	R3
+		CMP	R3,R2
+		BLO	6$
+		RETURN
+7$:		MOV	#12.,R0
+		XOR	R0,PSUIT
+		MOV	#SFX_PICK,SND_REQ
+		MOV	#1,HUDDIRTY
+9$:		RETURN
+
+; Is the player standing in teleport pad R0?  Z clear = yes.
+PL_ONPAD:	ASL	R0
+		MOV	TPROW(R0),R1
+		MOV	TPCOL(R0),R0
+		BR	PL_ATCELL
+
+; Is the player standing in the booth whose pad cell is (R0 = col,
+; R1 = row)?  Z clear = yes.  Preserves nothing.
+PL_ATCELL:	INC	R1		; the player's top line is the row below
+		ASL	R1
+		ASL	R1
+		ASL	R1
+		CMP	R1,PY
+		BNE	8$
+		ASL	R0		; pad x in 2-pixel units
+		ASL	R0
+		MOV	PX,R1
+		SUB	R0,R1
+		CMP	R1,#-12.
+		BLT	8$
+		CMP	R1,#8.
+		BGT	8$
+		MOV	#1,R0
+		RETURN
+8$:		CLR	R0
+		RETURN
+
+; Put the player on teleport pad R0, the way 0x98F9 does.  Both pads
+; throw sparks for TPFX_LEN frames - the original calls 0x9ED9 on the one
+; he leaves and again on the one he lands on - and the warp itself is
+; instant, so the shower is what reads as the travelling time.
+PL_WARP:	MOV	R0,-(SP)
+		MOV	PL_FROM,R0	; sparks where he was standing
+		CALL	PL_TPFX
+		MOV	@SP,R0		; and where he is going
+		CALL	PL_TPFX
+		MOV	(SP)+,R0
+		ASL	R0
+		MOV	TPROW(R0),R1
+		MOV	TPCOL(R0),R0
+		INC	R1
+		ASL	R1
+		ASL	R1
+		ASL	R1
+		MOV	R1,PY
+		ASL	R0
+		ASL	R0
+		SUB	#3,R0
+		BGE	1$
+		CLR	R0
+1$:		MOV	R0,PX
+		CLR	PJUMP
+		CLR	PFALL
+		MOV	#5,PFRAME
+		MOV	#SFX_PICK,SND_REQ
+		RETURN
+
+PL_FROM:	.WORD	0	; the pad PL_SPECIAL found him on
+
+; Start the spark shower over teleport pad R0 (0x9ED9): the emitter sits
+; one cell row below the pad, which is where the pad's own graphic is.
+PL_TPFX:	ASL	R0
+		MOV	TPROW(R0),R2
+		MOV	TPCOL(R0),R1
+		INC	R2
+		ASL	R2
+		ASL	R2
+		ASL	R2		; y = (row+1)*8
+		ASL	R1
+		ASL	R1		; x = col*4
+		MOV	#EK_TPFX,R0
+		CLR	R4
+		CALL	ENT_SPAWN
+		BEQ	9$
+		MOVB	#TPFX_LEN,E.T2(R3)
+9$:		RETURN
 
 ; ------------------------------------------------------------------
 ; Walking off the right edge moves on to the next zone.
@@ -394,6 +577,8 @@ PLAYER_KILL:	TST	PDEAD
 1$:		MOV	#46.,PDEAD
 		MOV	#SFX_DIE,SND_REQ
 		CLR	PJUMP
+		CLR	FRAMECNT	; the original restarts the zone timer
+		CLR	ROCKACT		; that sends the rocket in (0x9CBE)
 9$:		RETURN
 
 PL_DYING:	DEC	PDEAD
@@ -464,7 +649,11 @@ PL_ERASE:	TST	POLDF
 PL_SHOW:	CALL	PL_FRAME
 		MOV	PX,R1
 		MOV	PY,R2
-		CALL	SPR_PLAYER
+		CLR	SPRMIR		; the sheet only faces right, so walking
+		TST	PFACE		; left is drawn as the mirror image
+		BGE	1$
+		MOV	#1,SPRMIR
+1$:		CALL	SPR_PLAYER
 		MOV	PY,R0
 		ASR	R0
 		ASR	R0

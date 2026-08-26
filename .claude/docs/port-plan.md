@@ -82,14 +82,22 @@ Ported subsystem by subsystem from the RE:
   22-frame jump arc table, crouch, the 10-frame walk cycle, facing,
   the power suit as a frame offset.  Floor and ceiling tests read the
   solid map.
-- **bolts, grenades, missiles and explosions** - one entity list, the
-  kind picks the update rule.  A bolt destroys any live object it hits
-  and shoots down incoming missiles; a grenade flies in an arc and
-  blows a hole in solid scenery.
-- **enemies** - driven from the live object list: gun emplacements and
-  small guns fire along the player's row, rocket banks launch when he
-  comes near, dishes and hoppers lob at him.  Rocks, trees, mines and
-  force fields kill on contact through their collision class.
+- **bolts, grenades, missiles, sparks, energy balls and explosions** -
+  one entity list (`shots.mac`), the kind picks the update rule through
+  `EN_TAB` and four byte tables give each kind its collision box, its
+  cell footprint and how much of a sprite frame it actually fills.  A
+  bolt destroys any live object it hits, shoots down incoming fire and
+  pops a force field's energy balls; a grenade climbs the original's
+  arc, trails sparks and takes out the one live object whose box it
+  goes off in.
+- **enemies** - driven from the live object list: gun emplacements fire
+  down their own row on the original's random trigger and play its
+  eight-frame recoil, rocket banks launch when the player comes near,
+  dishes and hoppers lob at him.  A force field fills its ring with
+  drifting energy balls, a mine keeps a homing missile coming in from
+  the right, and a player who stays in one zone too long gets a rocket
+  sent after him.  Rocks, trees and mines kill on contact through their
+  collision class.
 - **HUD** - AMMO / GRENADES / POINTS / LIVES / ZONES, drawn from the
   same 8x8 font as the original.
 - **flow** - death animation and respawn, lives, game over, the zone
@@ -134,8 +142,41 @@ player, `make shot` / `make demo` drive the headless emulator, and
 6. HUD, zone flow, all 125 zones [DONE]
 7. beeper music + SFX in the PPU [DONE]
 8. title screen with the original logo, pause, docs, verify [DONE]
+9. the animation and behaviour passes: facing, the grenade's arc and
+   smoke, the emplacement recoil, the teleport shower, force-field
+   energy balls, mine missiles, the lingering-player rocket [DONE]
 
 ## Notes from the implementation
+
+- **Vitorc turns round, and the original's Vitorc does not.**  The ZX
+  sheet has one facing and the plotter at 0x76DA has no mirror path, so
+  walking left there is walking backwards.  The port draws the frame
+  mirrored instead (`SPRMIR` in `gfx.mac`): each line's three source
+  bytes swap ends and every byte's bits are reversed through a 256-byte
+  table built at startup.  It is the one deliberate departure from the
+  original's *look*, rather than from its rules.
+
+- **Sprites are what the frame rate is made of.**  A moving sprite here
+  costs several times what the ZX's XOR plotter did: the cells it
+  covers have to be re-expanded out of the cell buffer, the sprite ORed
+  into the back buffer, and the result blitted through the plane
+  window.  What made a force field affordable was (a) `MARK_RECT`
+  refusing duplicate rectangles and returning whether the mark was new,
+  so `ENTS_ERASE` repaints a patch of background only once however many
+  sprites sit on it, (b) per-kind sprite extents, since most of the
+  frames this port added to the 16x16 sheet are eight pixels tall and
+  eight wide, and (c) an inner loop that keeps the destination, the
+  source and the line count in registers, recomputes the row's plane
+  mask only when it crosses a cell row, and expands a source byte into
+  a cell word through a lookup table.  Between them they roughly
+  doubled the frame rate of a quiet zone.
+
+  The one place the original's numbers did not survive is how many
+  energy balls a force field emits: eight of them cost about a whole
+  quiet frame, and since they all swirl inside the ring's two cells and
+  overlap into one blob, `BALLS` is six, shared between the emitters of
+  the handful of zones that have two.
+
 
 - **Where the RAM ends.**  The UKNC CPU only has RAM below 0160000;
   0160000..0177777 is the I/O page in user mode.  Everything - program,
@@ -147,13 +188,38 @@ player, `make shot` / `make demo` drive the headless emulator, and
   distance, the brightness bit worth half a component).  Sprites use
   `WHITESL[row]`, the slot whose ink is nearest white; a playfield row
   whose third ink covers less than a quarter of its pixels hands that
-  slot to white outright.  Rows 0..7 are sky and are left alone, so the
-  planets keep their inks.
+  slot to white outright.  Every playfield row (8 and below) gives that
+  slot up unconditionally: without it the player changes colour in the
+  middle of a jump, when he rises into a row whose three inks happen to
+  be heavy enough to keep the third.  Rows 0..7 are sky and only give
+  it up when the third ink is a detail colour, so the planets keep
+  their inks.
 - **Collision follows the original's edges, not pixels.**  Walls are
   only tested when x is cell aligned, the floor only when y is, and the
   last few columns of a zone are always free (the original does the
   same at 0x80F3) - without that, edge scenery would trap the player
   where the zone should flip.
+- **A class in the collision map is not automatically a wall.**  The
+  original resolves this at zone load - `0x8E86` files every special
+  class's cells under that class and leaves 0/1/3/13 in the map - so
+  the port keeps the class in the cell and looks the solid/passable
+  answer up in `BLOCKTAB` (player.mac), which is the same split.  The
+  teleport and power-suit booths are found by scanning the finished map
+  for classes 6 and 12 (`SPEC_SCAN` in zone.mac) and are operated with
+  the up key, whose jump the booths' solid roofs cancel - exactly how
+  the original gets away with sharing the key.
+- **The laser is not a demolition tool, and neither is the grenade.**
+  The original's bolt tests the sprite-occupancy map only, so
+  emplacements and rock formations need a grenade; `OBJ_GRENONLY` in
+  shots.mac holds that list.  The grenade in turn destroys exactly one
+  thing - the live object whose bounding box holds the cell it went off
+  in (0x93E2) - and leaves plain scenery alone.  Its reach is the arc,
+  not a blast radius: thrown from under an emplacement it sails over,
+  and from far enough back the dive brings it down on top of it.
+- **Bolts and emplacement shots are single pixels** (`PIX_DRAW` in
+  gfx.mac), which is as close as the UKNC gets to the original's
+  two-pixel-resolution bullet pattern, and it is what makes ducking
+  under a shot readable.
 - **Destroying scenery replays its display list in erase mode**
   (`OBJ_ERASE`), so exactly the cells an object painted go blank.
   Clearing its bounding box instead would take the ground with it.

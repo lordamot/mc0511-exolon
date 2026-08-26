@@ -6,8 +6,9 @@ from the ZX Spectrum tape in this repository (`EXOLON.TAP`) and
 re-implemented in MACRO-11 for the UKNC's twin PDP-11 processors: all
 125 zones with their original scenery, the collision map that drives
 them, Vitorc with the original jump arc and walk cycle, his laser and
-grenades, the gun emplacements and rocket banks, the canisters and the
-power suit, plus three-voice beeper music and sound effects.
+grenades, the gun emplacements and their recoil, the force fields'
+energy balls, the mines' homing missiles, the canisters and the power
+suit, plus three-voice beeper music and sound effects.
 
 Everything builds from editable text sources into a bootable `.dsk`
 image with modern PC-based tools - no vintage software needed.
@@ -38,19 +39,37 @@ title screen waits for ENTER or fire.
 | Key | Action |
 |---|---|
 | ← → | walk |
-| ↑ | jump |
-| ↓ | crouch |
+| ↑ | jump; in a teleport booth or a suit booth, use it |
+| ↓ | crouch - a gun emplacement's shot passes over you |
 | ФИКС (LCtrl) or space | fire the laser |
 | numpad ВВОД (RCtrl) | throw a grenade |
 | ENTER | start / confirm |
 | СТОП | leave the game |
 
-Walk off the right of a zone to reach the next one.  Gun emplacements,
-rocket banks, mines and hoppers all shoot; a laser bolt destroys any of
-them, and it also shoots down an incoming missile.  Grenades blow a
-hole in solid scenery.  The white canisters refill the laser, the
-yellow ones the grenades, and the suit pod turns Vitorc into the
-armoured version.
+Walk off the right of a zone to reach the next one.  Gun emplacements
+fire down their own row - always to the left, the side you come from -
+and rock back as they do; crouch and the shot goes over your head.
+Force fields fill their rings with energy balls that swirl about and
+kill on contact, and mines throw a missile in from the right that comes
+down to your own height, over and over, until you shoot the mine out.
+
+A laser bolt shoots down what is in the air, destroys the moving
+enemies and pops the energy balls, but the gun emplacements and the
+rock formations that block the way out of a zone need a **grenade** -
+as in the original, where the bolt only ever tests the sprite map.  The
+grenade is a lob, not a blast: it leaves your shoulder climbing, flies
+level trailing smoke, then dives, and it destroys the one thing it
+lands on.  Thrown from directly under an emplacement it sails clean
+over; stand back and let the dive do the work.
+
+The white canisters refill the laser and the yellow ones the grenades:
+walk into them.  Standing in a teleport booth and pressing the up arrow
+moves Vitorc to the booth's other pad in a shower of sparks, and the
+same key in a power-suit booth puts the armour on.
+
+**Do not loiter.**  Stay in one zone for fourteen seconds and a rocket
+comes in from the right at your height, trailing smoke, and it does not
+miss twice.
 
 ## What is faithful, and what is not
 
@@ -69,8 +88,29 @@ code: the 22-entry jump arc table, the 10-frame walk cycle, walking at
 one 2-pixel unit a frame, and the collision rules - walls tested only
 when x sits on a cell boundary, the floor only when y does, and the
 last few columns of a zone always passable so scenery cannot trap you.
+So were the timings and tables behind everything that moves: the
+grenade's 32-step arc and the three-updates-a-frame it switches to
+half-way through, the emplacement's one-in-forty random trigger and the
+eight tile pairs of its recoil, the ten-frame spark and the twenty-
+frame shower each teleport pad throws, the energy balls' one-in-seven
+random turn, the mine's relaunch-at-a-random-height, and the 700 frames
+you have in a zone before a rocket is sent after you.
+
+The collision classes a display list writes follow the original's own
+solid/passable split (its table at 0x8EF4), so the frame of a teleport
+booth is walked through while its pad is not, and the teleport and the
+power suit are worked with the up arrow exactly as on the Spectrum.
 See `.claude/docs/re-notes.md` for where each of those lives in the
 original.
+
+Two things are deliberately **not** the original.  Vitorc turns round:
+the Spectrum sheet holds one facing and its plotter cannot mirror, so
+there he walks left backwards, while the port reverses each line of the
+frame through a lookup table.  And a force field emits six energy balls
+rather than eight - on this machine a moving sprite costs several times
+what the Spectrum's XOR plotter did, the balls all swirl inside the
+ring's two cells and overlap into one blob anyway, and the two extra
+would have cost a fifth of the frame rate in those zones.
 
 ## The machine, and what it does to the graphics
 
@@ -91,11 +131,12 @@ original (compare `make demo` with `tools/zone_render.py 0 out.png`),
 and where the Spectrum had to spend both of a cell's colours the port
 does not.
 
-Sprites are drawn in the slot whose ink is nearest white, and a
-playfield row whose third ink is only a detail colour hands that slot
-to white outright, so Vitorc stays white almost everywhere without
-costing the scenery a colour.  Sky rows are left alone entirely, which
-is why the planets keep their own inks.
+Sprites are drawn in the slot whose ink is nearest white, and every
+playfield row hands its third slot - the least used of the three - to
+white, so Vitorc is white wherever he can walk or jump.  Without that
+he changes colour halfway up a jump, in whatever row happens to have
+three heavy inks.  Sky rows only give the slot up when their third ink
+is a detail colour, which is why the planets keep their own inks.
 
 The beeper is a single bit (bit 7 of PPU port 177716).  The music
 engine gives each of three voices a 16-bit phase accumulator, adds its
@@ -132,7 +173,7 @@ carried an AY score that the 48K one never played, and
 | `uknc_control.py` | drive the headless UKNC emulator (boot, keys, screenshots, memory dumps, audio capture) |
 | `zx_control.py` | drive ZEsarUX on the original tape (keys, screenshots, memory dumps) |
 | `tap_extract.py` `z80dis.py` `z80_disasm.py` `z80_trace.py` `zx_view.py` | the ZX side: tape blocks, disassembly, code/data tracing, graphics viewing |
-| `verify_build.py` | the checks behind `make verify` |
+| `verify_build.py` | the checks behind `make verify`, scripted gameplay runs included (facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, mine missiles, the lingering-player rocket) |
 | `build_toolchain.py` | rebuild `bin/` from source |
 
 Resources are the source of truth.  Edit `src/res/zones/zones.txt`
@@ -140,9 +181,11 @@ Resources are the source of truth.  Edit `src/res/zones/zones.txt`
 `src/res/objects/objects.txt` (the scenery byte code, one mnemonic per
 line), `src/res/tiles/tiles.txt` (`#` bitmaps),
 `src/res/sprites/*.txt` or `src/res/music/title.txt` and rebuild.
-`make extract` regenerates them from the tape and overwrites local
-edits, including the laser and grenade sprites added by hand as frames
-45 and 46 of `small.txt`.
+`make extract` regenerates them from the tape, including frame 45 of
+`small.txt` (the laser bolt, which the original drew as a bare pattern)
+and frames 46..51, which are the grenade, the energy ball and the three
+sparks copied in from the original's *second*, 16x8 sprite bank at
+0xED40 - the port has one sprite format where the Spectrum had two.
 
 ## Credits
 

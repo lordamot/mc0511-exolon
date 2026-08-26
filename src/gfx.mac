@@ -77,7 +77,16 @@ CELL_DRAW:	MOV	R0,-(SP)
 		MOV	R1,-(SP)
 		CALL	CELLADDR	; R2 = cell record
 		CALL	BUFADDR		; R3 = buffer
-		MOVB	C.SLOT(R2),R0
+		CALL	CELL_ONE
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		RETURN
+
+; The same with the two addresses already worked out: R2 = the cell
+; record, R3 = its top line in the back buffer.  Clobbers everything.
+; CELL_RECT walks both pointers itself, because the shifts CELLADDR and
+; BUFADDR need cost as much again as expanding the cell does.
+CELL_ONE:	MOVB	C.SLOT(R2),R0
 		BIC	#177400,R0
 		MOV	@R2,R5		; tile index
 		ASL	R5
@@ -116,9 +125,7 @@ CD_P3:		MOVB	(R5)+,R1	; both planes
 		MOV	R1,(R3)
 		ADD	#BUF_ROW,R3
 		SOB	R2,CD_P3
-CD_END:		MOV	(SP)+,R1
-		MOV	(SP)+,R0
-		RETURN
+CD_END:		RETURN
 
 ; ------------------------------------------------------------------
 ; Clip a rectangle to the screen.  R0 = row, R1 = col, R2 = width,
@@ -160,23 +167,36 @@ CLIPRECT:	TST	R0
 ; ------------------------------------------------------------------
 ; Expand a rectangle of cells: R0 = row, R1 = col, R2 = width,
 ; R3 = height.  Clobbers everything.
+CRW:		.WORD	0
+CRW0:		.WORD	0
+CRH:		.WORD	0
+CRC:		.WORD	0
+CRC0:		.WORD	0
+CRB:		.WORD	0
+CRB0:		.WORD	0
+
 CELL_RECT:	CALL	CLIPRECT
 		BEQ	9$
-		MOV	R3,-(SP)	; rows left
-		MOV	R2,-(SP)	; width
-		MOV	R1,-(SP)	; first column
-1$:		MOV	2(SP),R2
-		MOV	@SP,R1
-2$:		MOV	R2,-(SP)
-		CALL	CELL_DRAW
-		MOV	(SP)+,R2
-		INC	R1
-		SOB	R2,2$
-		INC	R0
-		DEC	4(SP)
+		MOV	R3,CRH
+		MOV	R2,CRW0
+		CALL	CELLADDR	; R2 = first cell record
+		MOV	R2,CRC0
+		CALL	BUFADDR		; R3 = its top buffer line
+		MOV	R3,CRB0
+1$:		MOV	CRC0,CRC
+		MOV	CRB0,CRB
+		MOV	CRW0,CRW
+2$:		MOV	CRC,R2
+		MOV	CRB,R3
+		CALL	CELL_ONE
+		ADD	#C.SIZE,CRC
+		ADD	#2,CRB
+		DEC	CRW
+		BNE	2$
+		ADD	#C.ROW,CRC0
+		ADD	#BUF_CELLROW,CRB0
+		DEC	CRH
 		BNE	1$
-		CMP	(SP)+,(SP)+
-		TST	(SP)+
 9$:		RETURN
 
 EXPAND_ALL:	CLR	R0
@@ -244,8 +264,43 @@ BLIT_FULL:	CLR	R0
 ; pixels), the rest is the cell column.  A 3-byte-wide frame therefore
 ; covers four cell columns.
 ;
-; SPR_PLAYER: R0 = frame, R1 = x (2-px units), R2 = y (pixels).
-SPR_PLAYER:	MOV	R0,R4
+; The original never turns Vitorc round - the sheet holds one facing and
+; the plotter at 0x76DA has no mirror path - but the UKNC port does, so a
+; frame drawn with SPRMIR set has each line's 24 pixels reversed: the
+; three source bytes swap ends and each one's bits are reversed through
+; REVTAB.  SPR_SMALL always draws straight (the 16x16 bank carries both
+; facings of everything that has one).
+; The inner loop runs once per pixel line of every sprite on screen, so
+; it keeps the destination, the source and the line count in registers,
+; recomputes the row's plane mask only when it crosses a cell row, and
+; expands a source byte into a cell word through DUPTAB rather than a
+; SWAB-and-merge.  Anything that costs a memory reference here costs it
+; a few thousand times a frame.
+REV_INIT:	CLR	R0
+1$:		MOV	R0,R1		; REVTAB: the byte with its bits
+		CLR	R2		; reversed
+		MOV	#8.,R3
+2$:		ASR	R1
+		ROL	R2
+		SOB	R3,2$
+		MOVB	R2,REVTAB(R0)
+		MOV	R0,R1		; DUPTAB: the byte in both halves of a
+		MOV	R0,R2		; word, which is one pixel row of a
+		SWAB	R2		; sprite cell lighting both planes
+		BIS	R2,R1
+		ASL	R0
+		MOV	R1,DUPTAB(R0)
+		ASR	R0
+		INC	R0
+		CMP	R0,#256.
+		BLO	1$
+		RETURN
+
+; SPR_PLAYER: R0 = frame, R1 = x (2-px units), R2 = y (pixels).  The
+; player fills his frame, so he clears the extents the entity kinds set.
+SPR_PLAYER:	CLR	SPRH
+		CLR	SPRC
+		MOV	R0,R4
 		ASL	R4
 		ASL	R4
 		ASL	R4
@@ -260,8 +315,12 @@ SPR_PLAYER:	MOV	R0,R4
 		MOV	#3,TMPA		; source bytes per line
 		BR	SPR_GO
 
-; SPR_SMALL: R0 = frame, R1 = x, R2 = y.  2 bytes x 16 lines.
-SPR_SMALL:	MOV	R0,R4
+; SPR_SMALL: R0 = frame, R1 = x, R2 = y.  2 bytes x 16 lines, of which
+; SPRH are actually drawn - most of the frames this port added to the
+; sheet are eight lines tall, and drawing the blank half of one costs as
+; much as drawing the half that shows.
+SPR_SMALL:	CLR	SPRMIR
+		MOV	R0,R4
 		ASL	R4
 		ASL	R4
 		ASL	R4
@@ -269,8 +328,10 @@ SPR_SMALL:	MOV	R0,R4
 		ASL	R4		; frame*32
 		ADD	#SMALL_SPR,R4
 		MOV	R4,SPRSRC
+		MOV	SPRH,R5
+		BNE	1$
 		MOV	#16.,R5
-		MOV	#2,TMPA
+1$:		MOV	#2,TMPA
 
 SPR_GO:		MOV	R1,R3		; shift = (x & 3) * 2
 		BIC	#177774,R3
@@ -286,7 +347,14 @@ SPR_GO:		MOV	R1,R3		; shift = (x & 3) * 2
 		BLOS	1$
 		MOV	R4,R3
 1$:		MOV	R3,TMPB		; cells to write per line
-		BLE	SPR_DONE
+		BGT	SPR_GO1
+		JMP	SPR_DONE
+SPR_GO1:	MOV	SPRC,R3		; an eight-pixel frame never reaches
+		BEQ	SPR_GO2		; past the second cell, whatever the
+		CMP	TMPB,R3		; sub-cell shift, and testing the two
+		BLOS	SPR_GO2		; it cannot reach costs as much as
+		MOV	R3,TMPB		; drawing them
+SPR_GO2:	MOV	R2,SPRY
 		MOV	R2,R3		; dst = BUF + y*64 + col*2
 		ASL	R3
 		ASL	R3
@@ -298,25 +366,11 @@ SPR_GO:		MOV	R1,R3		; shift = (x & 3) * 2
 		ASL	R4
 		ADD	R4,R3
 		ADD	#BUF,R3
-		MOV	R3,SPRDST
-		MOV	R2,SPRY
+		CALL	SPR_SETNOT
 		MOV	SPRSRC,R4
 
-SPR_LINE:	MOV	SPRY,R0		; the row's white-ish slot decides
-		ASR	R0		; which planes the sprite lights
-		ASR	R0
-		ASR	R0
-		CMP	R0,#NROWS
-		BHIS	6$
-		MOVB	WHITESL(R0),R0
-		BIC	#177774,R0
-		ASL	R0
-		MOV	SLOTNOT(R0),SPRNOT
-		BR	7$
-6$:		CLR	SPRNOT
-7$:		INC	SPRY
-		MOV	SPRDST,R3
-		CMP	R3,#BUF
+; R3 = destination line, R4 = source, R5 = lines left
+SPR_LINE:	CMP	R3,#BUF
 		BLO	SPR_SKIP
 		CMP	R3,#BUF_END
 		BHIS	SPR_DONE
@@ -325,63 +379,151 @@ SPR_LINE:	MOV	SPRY,R0		; the row's white-ish slot decides
 		MOVB	(R4)+,R1
 		BIC	#177400,R1
 		SWAB	R1
-		BIS	R1,R0		; R0 = source bytes 0,1
+		BIS	R1,R0		; R0 = source bytes 0 and 1
+		CLR	R1
 		CMP	TMPA,#3
 		BNE	1$
-		MOVB	(R4)+,R1
+		MOVB	(R4)+,R1	; R1 = source byte 2
 		BIC	#177400,R1
-		BR	2$
-1$:		CLR	R1
-2$:		MOV	SPRSHIFT,R2
+1$:		TST	SPRMIR
+		BEQ	2$
+		CALL	SPR_FLIP
+2$:		MOV	SPRSHIFT,R2	; slide it into place
 		BEQ	4$
 3$:		ASL	R0
 		ROL	R1
-		DEC	R2
-		BNE	3$
-4$:		MOV	TMPB,R2		; cells left to write
-		CALL	SPR_PUT2	; bytes 0,1 -> cells 0,1
-		SUB	#2,R2
-		BLE	5$
-		ADD	#4,R3
-		MOV	R1,R0
-		CALL	SPR_PUT2	; bytes 2,3 -> cells 2,3
-5$:		ADD	#BUF_ROW,SPRDST
-		DEC	R5
+		SOB	R2,3$
+
+4$:		MOV	R0,R2		; cell 0
+		BIC	#177400,R2
+		BEQ	5$
+		ASL	R2
+		MOV	DUPTAB(R2),R2
+		BIC	SPRNOT,R2
+		BIS	R2,(R3)
+5$:		CMP	TMPB,#1
+		BLE	SPR_NEXT
+		MOV	R0,R2		; cell 1
+		SWAB	R2
+		BIC	#177400,R2
+		BEQ	6$
+		ASL	R2
+		MOV	DUPTAB(R2),R2
+		BIC	SPRNOT,R2
+		BIS	R2,2(R3)
+6$:		CMP	TMPB,#2
+		BLE	SPR_NEXT
+		MOV	R1,R2		; cell 2
+		BIC	#177400,R2
+		BEQ	7$
+		ASL	R2
+		MOV	DUPTAB(R2),R2
+		BIC	SPRNOT,R2
+		BIS	R2,4(R3)
+7$:		CMP	TMPB,#3
+		BLE	SPR_NEXT
+		MOV	R1,R2		; cell 3
+		SWAB	R2
+		BIC	#177400,R2
+		BEQ	SPR_NEXT
+		ASL	R2
+		MOV	DUPTAB(R2),R2
+		BIC	SPRNOT,R2
+		BIS	R2,6(R3)
+
+SPR_NEXT:	ADD	#BUF_ROW,R3
+		INC	SPRY
+		MOV	SPRY,R2		; a new cell row picks a new plane mask
+		BIC	#177770,R2
+		BNE	8$
+		CALL	SPR_SETNOT
+8$:		DEC	R5
 		BNE	SPR_LINE
 SPR_DONE:	RETURN
 
-SLOTNOT:	.WORD	0,177400,377,0	; slot -> planes to suppress
-SPR_SKIP:	ADD	TMPA,R4		; line above the buffer: skip source
-		ADD	#BUF_ROW,SPRDST
-		DEC	R5
-		BNE	SPR_LINE
+SPR_SKIP:	ADD	TMPA,R4		; line above the buffer: skip its source
+		BR	SPR_NEXT
+
+; The planes the sprite must not light in cell row SPRY>>3: sprites are
+; drawn in the slot whose ink is nearest white (zone.mac WHITESL), and
+; slots 1 and 2 are one plane each.  Clobbers R0 and R2.
+SPR_SETNOT:	MOV	SPRY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		CMP	R0,#NROWS
+		BHIS	9$
+		MOVB	WHITESL(R0),R0
+		BIC	#177774,R0
+		ASL	R0
+		MOV	SLOTNOT(R0),SPRNOT
+		RETURN
+9$:		CLR	SPRNOT
 		RETURN
 
-; OR the low byte of R0 into the cell word at (R3) and the high byte
-; into (R3+2), in white; R2 = how many of the two cells to write.
-; Preserves R1, R3, R4, R5.
-SPR_PUT2:	MOV	R2,-(SP)	; cells still to write
-		MOV	R0,R2
+SLOTNOT:	.WORD	0,177400,377,0	; slot -> planes to suppress
+
+; Mirror one 24-pixel line: the outer bytes swap ends and every byte has
+; its bits reversed.  R0 = bytes 0 and 1, R1 = byte 2.
+SPR_FLIP:	MOV	R0,R2
+		BIC	#177400,R2	; byte 0
+		MOVB	REVTAB(R2),R2
 		BIC	#177400,R2
-		BEQ	1$
-		MOV	R2,-(SP)
-		SWAB	R2
-		BIS	(SP)+,R2
-		BIC	SPRNOT,R2
-		BIS	R2,(R3)
-1$:		CMP	@SP,#1
-		BLE	2$
+		MOV	R2,SPRB0	; -> the new byte 2
 		MOV	R0,R2
-		BIC	#377,R2
-		BEQ	2$
 		SWAB	R2
-		MOV	R2,-(SP)
+		BIC	#177400,R2	; byte 1
+		MOVB	REVTAB(R2),R2
+		BIC	#177400,R2
 		SWAB	R2
-		BIS	(SP)+,R2
-		BIC	SPRNOT,R2
-		BIS	R2,2(R3)
-2$:		MOV	(SP)+,R2
+		MOVB	REVTAB(R1),R0	; byte 2 -> the new byte 0
+		BIC	#177400,R0
+		BIS	R2,R0
+		MOV	SPRB0,R1
 		RETURN
+
+; ------------------------------------------------------------------
+; A single pixel, for the laser bolts and the gun emplacements' shots.
+; The original draws those as a short pattern XORed onto the screen at
+; two-pixel resolution; here x is already in 2-pixel units, so one unit
+; is one pair of bits in the cell word and the dot is as small as the
+; screen can show.  R1 = x (2-pixel units), R2 = y (pixels).
+; The row's sprite slot picks the colour, exactly as for a sprite.
+PIXW:		.WORD	401,2004,10020,40100	; bit pair, both planes
+
+PIX_DRAW:	CMP	R2,#192.
+		BHIS	9$
+		CMP	R1,#128.
+		BHIS	9$
+		MOV	R2,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0		; cell row
+		MOVB	WHITESL(R0),R0
+		BIC	#177774,R0
+		ASL	R0
+		MOV	SLOTNOT(R0),R5
+		MOV	R1,R0
+		BIC	#177774,R0
+		ASL	R0
+		MOV	PIXW(R0),R4
+		BIC	R5,R4
+		BEQ	9$
+		MOV	R2,R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ASL	R3		; y * BUF_ROW
+		MOV	R1,R0
+		ASR	R0
+		ASR	R0
+		ASL	R0		; column word
+		ADD	R0,R3
+		ADD	#BUF,R3
+		BIS	R4,(R3)
+9$:		RETURN
 
 ; ------------------------------------------------------------------
 ; Text into the cell buffer: R3 = 0-terminated string (tile codes),

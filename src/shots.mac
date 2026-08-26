@@ -1,23 +1,113 @@
 ; ------------------------------------------------------------------
 ; Everything that flies: the player's laser bolts, grenades, enemy
-; missiles and the explosion animation.  One record layout for all of
-; them (see E.* in defs.mac); the kind selects the update rule.
+; missiles, explosions, sparks, a force field's energy balls and the
+; rocket that comes for a player who stays in one zone too long.  One
+; record layout for all of them (see E.* in defs.mac); the kind picks
+; the update rule through EN_TAB.
+;
+; The original keeps a separate list, and a separate loop, for each of
+; these: bullets at 0x845F, emplacement shots at 0x90CB, one grenade at
+; 0x925A, sparks at 0x9870, energy balls at 0x9A99, the wall emitters'
+; shots at 0x9E18 and one hunting rocket at 0xAC78.  Sharing a list
+; costs a dispatch and buys the tables below.
 ; ------------------------------------------------------------------
 
-EK_BOLT	= 1		; player bolt: straight, 4 px a frame
-EK_SHOT	= 2		; enemy missile: straight, 2 px a frame
-EK_GREN	= 3		; grenade: thrown in an arc, blows scenery up
-EK_BOOM	= 4		; explosion animation
+EK_BOLT	= 1.		; player bolt: one pixel, straight
+EK_SHOT	= 2.		; gun emplacement's shot: one pixel, straight
+EK_GREN	= 3.		; grenade, on the original's arc
+EK_BOOM	= 4.		; explosion animation
+EK_MISL	= 5.		; rocket / lobbed shot: a 16x16 sprite
+EK_SPARK = 6.		; one twinkling spark (0x981D / 0x9835)
+EK_BALL	= 7.		; a force field's drifting energy ball (0x9A23)
+EK_ROCK	= 8.		; the rocket that hunts a lingerer (0xAC7D)
+EK_TPFX	= 9.		; a teleport pad's spark emitter (0x9EEE)
+EK_MINE	= 10.		; a mine's homing missile (0xA26B)
+NKIND	= 11.
 
-SPR_BOLT = 45.		; frames added to src/res/sprites/small.txt
-SPR_GREN = 46.
-SPR_MISL = 13.		; missile from the original's 16x16 set
-SPR_BOOM = 0		; explosion runs frames 0..9
+SPR_GRENR = 46.		; the grenade in flight, facing right and left
+SPR_GRENL = 47.
+SPR_BALL = 48.		; a force field's energy ball
+SPR_MISL = 10.		; missile from the original's 16x16 set
+SPR_ROCK = 36.		; the rocket that hunts a lingering player
+SPR_MINE = 10.		; a mine's missile, closing and then bearing down
+SPR_MINE2 = 11.
+
+; The 16x16 bank holds two halves of an explosion: 12..15 is the flash
+; opening up and 5..9 the sparks thinning out (frame 0 is blank - the
+; old 0..9 run spent its first four frames drawing nothing and then
+; played the tail backwards).  Two ticks a frame, as in the original's
+; ten-step counter at 0x9835.
+BOOMSEQ:	.BYTE	12.,13.,14.,15.,5,6,7,8.,9.
+		.EVEN
+BOOMLEN	= 9.
+
+; A spark's ten frames, the original's table at 0x9864 read with the
+; counter running SPARK_LEN -> 1.  Frame 0 of the sheet is blank, which
+; is how the run ends.
+SPARKSEQ:	.BYTE	0		; (unused: the counter never reads 0)
+		.BYTE	0		; 1
+		.BYTE	51.,51.,51.	; 2..4
+		.BYTE	50.		; 5
+		.BYTE	51.		; 6
+		.BYTE	49.		; 7
+		.BYTE	51.		; 8
+		.BYTE	50.		; 9
+		.BYTE	49.		; 10
+		.EVEN
+
+; The grenade's arc (0x92DA), read with its counter running 32 -> 1: it
+; leaves the shoulder climbing hard, flies level for twenty-odd steps
+; and then sinks.  The counter sticks at 1, so a grenade that misses
+; everything keeps sinking until it hits the ground.
+GRENARC:	.BYTE	0			; (unused)
+		.BYTE	1			; 1
+		.BYTE	0,0,0,0,0,0,0,0,0,0	; 2..11
+		.BYTE	0,0,0,0,0,0,0,0,0,0	; 12..21
+		.BYTE	0,0			; 22..23
+		.BYTE	-1,-1,-1,-1		; 24..27
+		.BYTE	-2,-2,-2		; 28..30
+		.BYTE	-4,-4			; 31..32
+		.EVEN
+GRENLEN	= 32.
+GRENFAST = 19.		; below this the original updates it three times a
+			; frame (0x7604 / 0x761B) and the smoke stops
+GRENMAXX = 118.		; it cannot be thrown any closer to the right edge
+
+; ---- per-kind tables ---------------------------------------------
+; KINDPIX  drawn as a single pixel (bolts and shots) rather than a
+;          sprite; EK_TPFX draws nothing at all and is listed here so
+;          it only ever claims one cell
+; KINDRW/H the cell rectangle the kind covers, for erase and blit
+; KINDW/H  its collision box, x units and pixels - the numbers the
+;          original passes to 0x9BD6 in BC
+KINDPIX:	.BYTE	0,1,1,0,0,0,0,0,0,1,0
+KINDRW:		.BYTE	1,1,1,3,4,4,2,2,4,1,4
+KINDRH:		.BYTE	1,1,1,2,3,3,2,2,3,1,3
+KINDW:		.BYTE	1,1,1,8.,8.,8.,1,4.,16.,1,16.
+KINDH:		.BYTE	1,1,1,8.,16.,16.,1,8.,8.,1,8.
+; how much of a 16x16 frame actually holds anything: lines, and cells
+; across (an eight-pixel frame spans two cells at any sub-cell shift)
+KINDSH:		.BYTE	8.,8.,8.,8.,16.,16.,8.,8.,16.,8.,16.
+KINDSW:		.BYTE	2,2,2,2,4,4,2,2,4,2,4
+		.EVEN
+
+EN_TAB:		.WORD	EN_KILL		; 0: never happens
+		.WORD	EN_BOLT
+		.WORD	EN_SHOT
+		.WORD	EN_GREN
+		.WORD	EN_BOOM
+		.WORD	EN_SHOT		; EK_MISL rides the shot rule
+		.WORD	EN_SPARK
+		.WORD	EN_BALL
+		.WORD	EN_ROCK
+		.WORD	EN_TPFX
+		.WORD	EN_MINE
 
 ENTS_CLEAR:	MOV	#ENTS,R0
 		MOV	#E.SIZE*NENT,R1
 1$:		CLRB	(R0)+
 		SOB	R1,1$
+		CLR	ROCKACT
 		RETURN
 
 ; ------------------------------------------------------------------
@@ -35,6 +125,7 @@ ENT_NEW:	MOV	#ENTS,R3
 
 ; ------------------------------------------------------------------
 ; Spawn: R0 = kind, R1 = x, R2 = y, R4 = signed x step.
+; -> R3 = the record and Z clear when there was room for it.
 ENT_SPAWN:	MOV	R0,-(SP)
 		MOV	R1,-(SP)
 		MOV	R2,-(SP)
@@ -51,8 +142,10 @@ ENT_SPAWN:	MOV	R0,-(SP)
 		MOVB	R0,E.KIND(R3)
 		MOVB	R4,E.T1(R3)
 		CLRB	E.T2(R3)
+		MOV	#1,R0		; Z clear: it is in the list
 		RETURN
 9$:		ADD	#8.,SP
+		CLR	R0
 		RETURN
 
 ; ------------------------------------------------------------------
@@ -69,27 +162,35 @@ SHOOT_BOLT:	TST	PDEAD
 		MOV	#SFX_SHOT,SND_REQ
 		MOV	PX,R1
 		MOV	PY,R2
-		ADD	#12.,R2		; muzzle height
+		ADD	#14.,R2		; muzzle height (0x8391: +14, +19 ducking)
 		TST	PDUCK
 		BEQ	1$
-		ADD	#7,R2
+		ADD	#5,R2
 1$:		MOV	#3,R4
 		TST	PFACE
 		BGT	2$
 		MOV	#-3,R4
-		SUB	#2,R1
+		SUB	#4,R1
+		BGE	3$
+		CLR	R1
 		BR	3$
-2$:		ADD	#10.,R1
+2$:		ADD	#12.,R1
 3$:		MOV	#EK_BOLT,R0
 		CALL	ENT_SPAWN
 9$:		RETURN
 
 ; ------------------------------------------------------------------
-; The player throws a grenade.
+; The player throws a grenade (0x9208).  Only one is ever in the air,
+; it leaves the shoulder rather than the hip, and it goes nowhere if he
+; is standing against the right-hand edge of the zone.
 THROW_GREN:	TST	PDEAD
 		BNE	9$
 		TST	GRENADES
 		BEQ	9$
+		CMP	PX,#GRENMAXX
+		BHIS	9$
+		CALL	GREN_LIVE
+		BNE	9$
 		MOV	#K_GREN,R0
 		CALL	KEY_EDGE
 		BEQ	9$
@@ -97,17 +198,34 @@ THROW_GREN:	TST	PDEAD
 		MOV	#1,HUDDIRTY
 		MOV	#SFX_SHOT,SND_REQ
 		MOV	PX,R1
+		ADD	#4,R1
 		MOV	PY,R2
-		ADD	#8.,R2
-		MOV	#2,R4
+		TST	PDUCK
+		BEQ	1$
+		ADD	#6,R2
+1$:		MOV	#1,R4
 		TST	PFACE
-		BGT	1$
-		MOV	#-2,R4
-		BR	2$
-1$:		ADD	#10.,R1
+		BGT	2$
+		MOV	#-1,R4
 2$:		MOV	#EK_GREN,R0
 		CALL	ENT_SPAWN
+		BEQ	9$
+		MOVB	#GRENLEN,E.T2(R3)
 9$:		RETURN
+
+; Is a grenade already in the air?  Z clear = yes.
+GREN_LIVE:	MOV	#ENTS,R3
+		MOV	#NENT,R1
+1$:		TSTB	E.STATE(R3)
+		BEQ	2$
+		CMPB	E.KIND(R3),#EK_GREN
+		BNE	2$
+		MOV	#1,R0
+		RETURN
+2$:		ADD	#E.SIZE,R3
+		SOB	R1,1$
+		CLR	R0
+		RETURN
 
 ; ------------------------------------------------------------------
 ; Update and draw every live entity.
@@ -128,121 +246,513 @@ ENTS_UPD:	MOV	#ENTS,R5
 ; blit helpers clobber every register)
 ECUR:		.WORD	0
 ENT_ONE:	MOV	R5,ECUR
-		MOVB	E.KIND(R5),R0
-		BIC	#177400,R0
-		CMP	R0,#EK_BOOM
-		BEQ	EN_BOOM
-		CMP	R0,#EK_GREN
-		BEQ	EN_GREN
-		CMP	R0,#EK_SHOT
-		BEQ	EN_SHOT
+		MOVB	E.KIND(R5),R1
+		BIC	#177400,R1
+		CMP	R1,#NKIND
+		BHIS	9$
+		ASL	R1		; (bin/macro11 rejects @X(R0) on a JMP)
+		JMP	@EN_TAB(R1)
+9$:		JMP	EN_KILL
 
 ; ---- player bolt -------------------------------------------------
+; The original's bolt (0x83DD) never touches scenery: it dies on the
+; sprite-occupancy map, so the only things it destroys are the moving
+; enemies and the shots in the air.  Emplacements and rock formations
+; are the grenade's job - see GREN_BLAST.
 EN_BOLT:	CALL	ENT_STEPX
 		BNE	90$
 		JMP	EN_KILL
-90$:
-		CALL	ENT_CELLCLASS
-		TST	R2
+90$:		CALL	BOLT_VS_SHOT	; shoot an incoming shot down
 		BEQ	1$
-		CALL	OBJ_AT_BOLT	; part of a live object?
+		JMP	EN_HITOBJ
+1$:		CALL	ENT_CELLCLASS
+		MOV	R2,R0
+		CALL	CLASS_BLOCK
+		BEQ	2$
+		MOV	ECUR,R5
+		CALL	OBJ_AT_BOLT	; a live target in the way?
 		BEQ	91$
 		JMP	EN_HITOBJ
 91$:		JMP	EN_KILL		; plain scenery just stops the bolt
-		CALL	BOLT_VS_SHOT
-		BEQ	1$
-		JMP	EN_HITOBJ
-1$:		INCB	E.T2(R5)
+2$:		MOV	ECUR,R5
+		INCB	E.T2(R5)
 		CMPB	E.T2(R5),#40.
 		BLO	92$
 		JMP	EN_KILL
-92$:
-		MOV	#SPR_BOLT,R0
-		JMP	ENT_SHOW
+92$:		JMP	ENT_SHOWPIX
 
-; ---- enemy missile -----------------------------------------------
+; ---- enemy shot / missile ----------------------------------------
 EN_SHOT:	CALL	ENT_STEPX
 		BNE	93$
 		JMP	EN_KILL
-93$:
-		CALL	ENT_CELLCLASS
-		TST	R2
+93$:		CALL	ENT_CELLCLASS
+		MOV	R2,R0
+		CALL	CLASS_BLOCK
 		BEQ	1$
-		CMP	R2,#2
-		BHI	94$
 		JMP	EN_KILL
-94$:
-1$:		CALL	ENT_HITPLAYER
+1$:		MOV	ECUR,R5
+		CALL	ENT_HITPLAYER
 		BEQ	2$
 		CALL	PLAYER_KILL
 		JMP	EN_KILL
-2$:		INCB	E.T2(R5)
+2$:		MOV	ECUR,R5
+		INCB	E.T2(R5)
 		CMPB	E.T2(R5),#80.
 		BLO	95$
 		JMP	EN_KILL
-95$:
-		MOV	#SPR_MISL,R0
+95$:		CMPB	E.KIND(R5),#EK_MISL
+		BEQ	96$
+		JMP	ENT_SHOWPIX
+96$:		MOV	#SPR_MISL,R0
 		JMP	ENT_SHOW
 
 ; ---- grenade -----------------------------------------------------
-EN_GREN:	CALL	ENT_STEPX
-		BNE	96$
-		JMP	EN_BLOW
-96$:
-		INCB	E.T2(R5)
-		MOVB	E.T2(R5),R0	; a simple arc: up, then down
-		BIC	#177400,R0
-		CMP	R0,#12.
-		BHI	1$
-		MOVB	E.Y(R5),R1
-		BIC	#177400,R1
-		SUB	#2,R1
-		BGE	11$
-		CLR	R1
-11$:		MOVB	R1,E.Y(R5)
-		BR	2$
-1$:		MOVB	E.Y(R5),R1
-		BIC	#177400,R1
-		ADD	#2,R1
-		CMP	R1,#188.
-		BLO	12$
-		JMP	EN_BLOW
-12$:		MOVB	R1,E.Y(R5)
-2$:		CALL	ENT_CELLCLASS
-		TST	R2
-		BEQ	97$
-		JMP	EN_BLOW
-97$:
-		MOV	#SPR_GREN,R0
-		JMP	ENT_SHOW
+; The original runs the grenade once a frame while the arc is climbing
+; and three times a frame afterwards (the extra calls at 0x7604 and
+; 0x761B), which is what makes it leave in a lazy lob and then tear
+; away.  Each step is one x unit; the arc table supplies the rise.
+GRSTEPS:	.WORD	0
+GRIDX:		.WORD	0
+GRDY:		.WORD	0
 
-EN_BLOW:	CALL	GREN_BLAST
-		JMP	EN_BOOMSTART
+EN_GREN:	MOV	#1,GRSTEPS
+		MOVB	E.T2(R5),R0
+		BIC	#177400,R0
+		CMP	R0,#GRENFAST
+		BHIS	1$
+		MOV	#3,GRSTEPS
+1$:		MOV	ECUR,R5
+		CALL	GREN_STEP
+		TST	R0
+		BEQ	9$		; it went off
+		DEC	GRSTEPS
+		BNE	1$
+		MOV	ECUR,R5
+		MOV	#SPR_GRENR,R0
+		TSTB	E.T1(R5)
+		BGT	2$
+		MOV	#SPR_GRENL,R0
+2$:		JMP	ENT_SHOW
+9$:		RETURN
+
+; One step of the grenade at R5; R0 = 0 when it went off.
+GREN_STEP:	MOVB	E.T2(R5),R0	; the arc index, which sticks at 1
+		BIC	#177400,R0
+		MOV	R0,GRIDX
+		CMP	R0,#1
+		BLOS	1$
+		DEC	R0
+		MOVB	R0,E.T2(R5)
+1$:		MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		BEQ	8$		; either edge sets it off
+		CMP	R0,#124.
+		BHIS	8$
+		CALL	GREN_WALL	; and so does anything solid ahead
+		BNE	8$
+		MOV	ECUR,R5
+		CALL	ENT_STEPX
+		BEQ	8$
+		MOV	ECUR,R5
+		MOV	GRIDX,R0
+		MOVB	GRENARC(R0),R0
+		MOV	R0,GRDY
+		CMP	R0,#-1		; the original skips the floor test on
+		BEQ	2$		; the arc's gentlest step (0x92A3)
+		MOV	#1,R4
+		CALL	ENT_VWALL
+		BNE	8$
+2$:		MOV	ECUR,R5
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ADD	GRDY,R0
+		CMP	R0,#168.	; off the top or into the floor
+		BHIS	8$
+		MOVB	R0,E.Y(R5)
+		CALL	GREN_TRAIL
+		MOV	ECUR,R5
+		MOV	#1,R0
+		RETURN
+8$:		MOV	ECUR,R5
+		CALL	GREN_BLAST
+		MOV	ECUR,R5
+		CALL	EN_BOOMSTART
+		CLR	R0
+		RETURN
+
+; The smoke it leaves while the arc is still climbing (0x92C9): one
+; spark a step, a sprite's width behind it.
+GREN_TRAIL:	MOVB	E.T2(R5),R0
+		BIC	#177400,R0
+		CMP	R0,#GRENFAST
+		BLO	9$
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		TSTB	E.T1(R5)
+		BLE	1$
+		SUB	#4,R1
+		BR	2$
+1$:		ADD	#4,R1
+2$:		TST	R1
+		BLT	9$
+		CMP	R1,#128.
+		BHIS	9$
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		CALL	SPARK_NEW
+9$:		MOV	ECUR,R5
+		RETURN
 
 ; ---- explosion ---------------------------------------------------
 EN_BOOM:	INCB	E.T2(R5)
 		MOVB	E.T2(R5),R0
 		BIC	#177400,R0
 		ASR	R0
-		CMP	R0,#10.
+		CMP	R0,#BOOMLEN
 		BLO	98$
 		JMP	EN_KILL
-98$:
-		MOV	R0,-(SP)
+98$:		MOV	R0,-(SP)
 		CALL	ENT_HITPLAYER
 		BEQ	1$
 		CALL	PLAYER_KILL
 1$:		MOV	(SP)+,R0
+		MOVB	BOOMSEQ(R0),R0
+		BIC	#177400,R0
 		MOV	ECUR,R5
 		JMP	ENT_SHOW
 
+; Turn the entity into an explosion.  A one-pixel entity has to move
+; back half a sprite first, or the blast hangs off its lower right.
 EN_BOOMSTART:	MOV	ECUR,R5
-		MOVB	#EK_BOOM,E.KIND(R5)
+		CALL	ENT_ISPIX
+		BEQ	1$
+		MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		SUB	#4,R0
+		BGE	2$
+		CLR	R0
+2$:		MOVB	R0,E.X(R5)
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		SUB	#8.,R0
+		BGE	3$
+		CLR	R0
+3$:		MOVB	R0,E.Y(R5)
+1$:		MOVB	#EK_BOOM,E.KIND(R5)
 		CLRB	E.T2(R5)
 		MOV	#SFX_BOOM,SND_REQ
-		CLR	R0
+		MOVB	BOOMSEQ,R0
+		BIC	#177400,R0
 		JMP	ENT_SHOW
 
+; ---- spark -------------------------------------------------------
+; The original's 0x9835: ten frames of a twinkle, straight off the
+; SPARKSEQ table, and no collision of any kind.
+EN_SPARK:	MOVB	E.T2(R5),R0
+		BIC	#177400,R0
+		BEQ	9$
+		DECB	E.T2(R5)
+		MOVB	SPARKSEQ(R0),R0
+		BIC	#177400,R0
+		BEQ	9$
+		JMP	ENT_SHOW
+9$:		JMP	EN_KILL
+
+; Spawn a spark at (R1 = x, R2 = y).  Preserves ECUR, not the registers.
+SPARK_NEW:	MOV	#EK_SPARK,R0
+		CLR	R4
+		CALL	ENT_SPAWN
+		BEQ	9$
+		MOVB	#SPARK_LEN,E.T2(R3)
+9$:		MOV	ECUR,R5
+		RETURN
+
+; ---- a teleport pad's spark shower -------------------------------
+; 0x9EEE: for TPFX_LEN frames the pad throws one spark somewhere in the
+; four pixels by sixteen above it.  The emitter itself draws nothing.
+EN_TPFX:	MOVB	E.T2(R5),R0
+		BIC	#177400,R0
+		BEQ	9$
+		DECB	E.T2(R5)
+		CALL	RANDOM
+		BIC	#177774,R0
+		MOV	ECUR,R5
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ADD	R0,R1
+		CALL	RANDOM
+		BIC	#177760,R0
+		MOV	ECUR,R5
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		ADD	R0,R2
+		CMP	R2,#192.
+		BHIS	8$
+		CMP	R1,#128.
+		BHIS	8$
+		CALL	SPARK_NEW
+8$:		MOV	ECUR,R5
+		RETURN
+9$:		JMP	EN_KILL
+
+; ---- a force field's energy ball ---------------------------------
+; 0x9A23: it drifts sideways until an edge, a wall or plain luck turns
+; it round, and wanders a pixel up or down every frame.  A bolt pops it
+; for points (BOLT_VS_SHOT); touching it is fatal.
+BALLDY:		.WORD	0
+BALLX:		.WORD	0
+BALLY:		.WORD	0
+BALLN:		.WORD	0
+
+EN_BALL:	MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		BEQ	1$		; the edges turn it round
+		CMP	R0,#123.
+		BHIS	1$
+		CALL	RANDOM		; and so does luck, now and then
+		CMP	R0,#BALL_TURN
+		BHIS	1$
+		MOV	ECUR,R5
+		CALL	GREN_WALL	; and scenery in the way
+		BEQ	2$
+1$:		MOV	ECUR,R5
+		MOVB	E.T1(R5),R0
+		NEG	R0
+		MOVB	R0,E.T1(R5)
+2$:		MOV	ECUR,R5
+		CALL	ENT_STEPX
+		BNE	3$
+		JMP	EN_KILL
+3$:		CALL	RANDOM		; a pixel up or a pixel down
+		BIC	#177776,R0
+		ASL	R0
+		DEC	R0
+		MOV	R0,BALLDY
+		MOV	ECUR,R5
+		MOV	#1,R4
+		TST	BALLDY
+		BGT	4$
+		MOV	#-1,R4
+4$:		CALL	ENT_VWALL
+		TST	R0
+		BEQ	5$
+		CLR	BALLDY
+5$:		MOV	ECUR,R5
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ADD	BALLDY,R0
+		BGT	6$
+		MOV	#1,R0
+6$:		CMP	R0,#184.
+		BLOS	7$
+		MOV	#184.,R0
+7$:		MOVB	R0,E.Y(R5)
+		CALL	ENT_HITPLAYER
+		BEQ	8$
+		CALL	PLAYER_KILL
+		MOV	ECUR,R5
+		JMP	EN_POP
+8$:		MOV	ECUR,R5
+		MOV	#SPR_BALL,R0
+		JMP	ENT_SHOW
+
+; A ball is gone: a spark where it was, and out of the list.
+EN_POP:		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		CALL	SPARK_NEW
+		MOV	#SFX_BOOM,SND_REQ
+		MOV	ECUR,R5
+		JMP	EN_KILL
+
+; Start a force field's balls at cell (R0 = row, R1 = column), the way
+; 0x9B07 does when the zone is loaded.  Clobbers everything.
+;
+; The original gives every emitter BALLS of them; on the UKNC a moving
+; sprite costs several times what the ZX's XOR plotter did, so the
+; emitters in a zone share one budget instead - a zone with a single
+; force field is exactly the original, and the handful with two get
+; half each rather than half the frame rate.
+BALL_EMIT:	MOV	BALLQ,BALLN
+		BEQ	9$
+		ASL	R1
+		ASL	R1
+		ADD	#2,R1		; x = col*4 + 2
+		MOV	R1,BALLX
+		ASL	R0
+		ASL	R0
+		ASL	R0
+		ADD	#3,R0		; y = row*8 + 3
+		MOV	R0,BALLY
+1$:		CALL	RANDOM
+		BIC	#177776,R0
+		ASL	R0
+		DEC	R0		; -1 or +1
+		MOV	R0,R4
+		MOV	BALLX,R1
+		MOV	BALLY,R2
+		MOV	#EK_BALL,R0
+		CALL	ENT_SPAWN
+		BEQ	9$
+		DEC	BALLN
+		BNE	1$
+9$:		RETURN
+
+; How many balls each of this zone's force fields gets: BALLS when there
+; is one, and the same total split between them when there are more.
+BALLQ:		.WORD	0
+
+BALL_SHARE:	MOV	#BALLS,R0
+		TST	R1
+		BLE	9$
+		CMP	R1,#1
+		BLOS	9$
+		CLR	R0
+		MOV	#BALLS,R2
+2$:		SUB	R1,R2
+		BLT	9$
+		INC	R0
+		BR	2$
+9$:		MOV	R0,BALLQ
+		RETURN
+
+; ---- the rocket that hunts a lingering player --------------------
+; 0xAC59 arms it after ROCK_WAIT frames in one zone, at the height the
+; player happens to be; 0xAC7D flies it in from the right, trailing
+; smoke once it is properly on screen.
+ROCK_CHECK:	TST	PDEAD
+		BNE	9$
+		TST	ROCKACT
+		BNE	9$
+		CMP	FRAMECNT,#ROCK_WAIT
+		BLO	9$
+		MOV	#ROCK_X,R1
+		MOV	PY,R2
+		MOV	#ROCK_STEP,R4
+		MOV	#EK_ROCK,R0
+		CALL	ENT_SPAWN
+		BEQ	9$
+		MOV	#1,ROCKACT
+9$:		RETURN
+
+EN_ROCK:	MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		BNE	1$
+9$:		CLR	ROCKACT		; it crossed the whole zone
+		MOV	ECUR,R5
+		JMP	EN_KILL
+1$:		CMP	R0,#ROCK_SMOKE
+		BHIS	3$
+		CALL	RANDOM
+		CMP	R0,#128.
+		BLO	3$
+		MOV	ECUR,R5
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ADD	#6,R1
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		ADD	#4,R2
+		CMP	R2,#192.
+		BHIS	3$
+		CALL	SPARK_NEW
+3$:		MOV	ECUR,R5
+		CALL	ENT_STEPX
+		BEQ	9$
+		MOV	ECUR,R5
+		CALL	ENT_HITPLAYER
+		BEQ	5$
+		CALL	PLAYER_KILL
+		BR	9$
+5$:		MOV	ECUR,R5
+		MOV	#SPR_ROCK,R0
+		JMP	ENT_SHOW
+
+; ---- a mine's homing missile -------------------------------------
+; 0xA23A launches one whenever the last has gone, at a random height on
+; the right-hand edge, and keeps doing it as long as the mine's own cell
+; is still class 13 - so the only way to stop them is to shoot the mine
+; out.  0xA26B flies it: a pixel a frame towards the player's height,
+; one x unit a frame until MINE_FAST and two after that.
+MINE_CHECK:	TST	NMINE
+		BEQ	9$
+		TST	PDEAD
+		BNE	9$
+		CALL	MINE_LIVE	; only ever one in the air
+		BNE	9$
+		MOV	MINEROW,R0
+		MOV	MINECOL,R1
+		CALL	MAP_CLASS
+		CMP	R0,#CL_MINE
+		BNE	9$		; the mine itself has been shot out
+		CALL	RANDOM
+		BIC	#177600,R0
+		ADD	#MINE_Y0,R0
+		MOV	R0,R2
+		MOV	#MINE_X,R1
+		MOV	#-1,R4
+		MOV	#EK_MINE,R0
+		CALL	ENT_SPAWN
+9$:		RETURN
+
+MINE_LIVE:	MOV	#ENTS,R3
+		MOV	#NENT,R1
+1$:		TSTB	E.STATE(R3)
+		BEQ	2$
+		CMPB	E.KIND(R3),#EK_MINE
+		BNE	2$
+		MOV	#1,R0
+		RETURN
+2$:		ADD	#E.SIZE,R3
+		SOB	R1,1$
+		CLR	R0
+		RETURN
+
+EN_MINE:	MOV	MINEROW,R0
+		MOV	MINECOL,R1
+		CALL	MAP_CLASS
+		CMP	R0,#CL_MINE
+		BEQ	1$
+		MOV	ECUR,R5		; the mine is gone and so is its work
+		JMP	EN_KILL
+1$:		MOV	ECUR,R5
+		MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		MOV	#SPR_MINE,R1
+		CMP	R0,#MINE_FAST
+		BHIS	2$
+		MOV	#SPR_MINE2,R1	; it bears down over the last stretch
+		MOVB	#-2,E.T1(R5)
+2$:		MOV	R1,MINEFR
+		CALL	ENT_STEPX
+		BNE	3$
+		JMP	EN_KILL		; off the left edge: MINE_CHECK sends
+3$:		MOV	ECUR,R5		; the next one
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		CMP	R0,PY		; close on the player's height
+		BEQ	5$
+		BHI	4$
+		INC	R0
+		BR	5$
+4$:		DEC	R0
+5$:		CMP	R0,#MINE_YN
+		BLOS	6$
+		MOV	#MINE_YN,R0
+6$:		MOVB	R0,E.Y(R5)
+		CALL	ENT_HITPLAYER
+		BEQ	7$
+		CALL	PLAYER_KILL
+		MOV	ECUR,R5
+		JMP	EN_KILL
+7$:		MOV	ECUR,R5
+		MOV	MINEFR,R0
+		JMP	ENT_SHOW
+
+MINEFR:		.WORD	0
+
+; ------------------------------------------------------------------
 EN_KILL:	MOV	ECUR,R3		; it may already be on screen this
 		CALL	ENT_WIPE	; frame, so put the background back
 		MOV	ECUR,R5
@@ -259,18 +769,9 @@ EN_HITOBJ:	CALL	SCORE_HIT
 ; the object is wiped out (its cells go, so the way is clear) and Z is
 ; returned clear.  Every object with a bounding box is a target - that
 ; is how the original marks what can be shot - except the two pickup
-; canisters, which are there to be walked into.
-OBJ_AT_BOLT:	MOVB	E.Y(R5),R0
-		BIC	#177400,R0
-		ADD	#4,R0
-		ASR	R0
-		ASR	R0
-		ASR	R0			; cell row
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
-		ADD	#2,R1
-		ASR	R1
-		ASR	R1			; cell column
+; canisters, which are there to be walked into, and the emplacements
+; and rock formations, which only a grenade opens up.
+OBJ_AT_BOLT:	CALL	ENT_HOT			; R0 = cell row, R1 = column
 		MOV	#OBJLIST,R3
 		MOV	NLIVE,R4
 		BEQ	8$
@@ -282,6 +783,8 @@ OBJ_AT_BOLT:	MOVB	E.Y(R5),R0
 		BEQ	5$			; targets
 		CMP	R2,#OB_AMMO2
 		BEQ	5$
+		CALL	OBJ_GRENONLY		; emplacements and rock need
+		BNE	5$			; a grenade
 		MOVB	O.X0(R3),R2
 		CMP	R1,R2
 		BLT	5$
@@ -342,55 +845,81 @@ OCH:		.WORD	0
 ; been drawn this frame.  Preserves R3.
 ENT_WIPE:	MOV	R3,-(SP)
 		MOV	R4,-(SP)
-		MOVB	E.Y(R3),R0
-		BIC	#177400,R0
-		ASR	R0
-		ASR	R0
-		ASR	R0
-		MOVB	E.X(R3),R1
-		BIC	#177400,R1
-		ASR	R1
-		ASR	R1
-		MOV	R0,-(SP)
+		MOV	R5,-(SP)
+		MOV	R3,R5
+		CALL	ENT_RECT
+		MOV	R5,-(SP)
+		MOV	R3,-(SP)
+		MOV	R2,-(SP)
 		MOV	R1,-(SP)
-		MOV	#4,R2
-		MOV	#3,R3
+		MOV	R0,-(SP)
 		CALL	CELL_RECT
-		MOV	(SP)+,R1
 		MOV	(SP)+,R0
-		MOV	#4,R2
-		MOV	#3,R3
+		MOV	(SP)+,R1
+		MOV	(SP)+,R2
+		MOV	(SP)+,R3
 		CALL	MARK_RECT
+		MOV	(SP)+,R5
+		MOV	(SP)+,R5
 		MOV	(SP)+,R4
 		MOV	(SP)+,R3
 		RETURN
 
 ; ------------------------------------------------------------------
-; Does the bolt at R5 overlap an enemy missile?  Z clear = yes, and
-; the missile is removed.
+; Does the bolt at R5 overlap something the enemy put in the air?  Z
+; clear = yes, and that thing is removed.  Shooting the incoming fire
+; down is the one thing the original's bolt really does (0x83DD tests
+; the sprite map, not the scenery), and the same test at 0x9B52 pops a
+; force field's energy balls, so the kinds are listed together here.
+; The bolt is a single pixel and its targets move several pixels a
+; frame, so the margins are generous.
+BVS_MX	= 3		; margin, x units
+BVS_MY	= 5		; margin, pixels
+BVSN:		.WORD	0
+BVSOBJ:		.WORD	0
+BVSW:		.WORD	0
+BVSH:		.WORD	0
+
 BOLT_VS_SHOT:	MOV	#ENTS,R3
-		MOV	#NENT,R4
+		MOV	#NENT,BVSN
 1$:		TSTB	E.STATE(R3)
 		BEQ	3$
-		CMPB	E.KIND(R3),#EK_SHOT
+		MOVB	E.KIND(R3),R0
+		BIC	#177400,R0
+		CMP	R0,#EK_SHOT
+		BEQ	2$
+		CMP	R0,#EK_MISL
+		BEQ	2$
+		CMP	R0,#EK_BALL
 		BNE	3$
+2$:		MOV	R3,BVSOBJ	; measure against the target's own box
+		MOV	R3,R5
+		CALL	ENT_BOX
+		MOV	R2,BVSW
+		MOV	R3,BVSH
+		MOV	BVSOBJ,R3
+		MOV	ECUR,R5
+		MOVB	E.X(R5),R1	; the bolt is a single point
+		BIC	#177400,R1
 		MOVB	E.X(R3),R0
 		BIC	#177400,R0
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
-		SUB	R1,R0
-		CMP	R0,#-3
+		SUB	#BVS_MX,R0
+		CMP	R1,R0
 		BLT	3$
-		CMP	R0,#3
+		ADD	BVSW,R0
+		ADD	#BVS_MX+BVS_MX,R0
+		CMP	R1,R0
 		BGT	3$
-		MOVB	E.Y(R3),R0
-		BIC	#177400,R0
 		MOVB	E.Y(R5),R1
 		BIC	#177400,R1
-		SUB	R1,R0
-		CMP	R0,#-14.
+		MOVB	E.Y(R3),R0
+		BIC	#177400,R0
+		SUB	#BVS_MY,R0
+		CMP	R1,R0
 		BLT	3$
-		CMP	R0,#14.
+		ADD	BVSH,R0
+		ADD	#BVS_MY+BVS_MY,R0
+		CMP	R1,R0
 		BGT	3$
 		CALL	ENT_WIPE	; it may already be on screen
 		CLRB	E.STATE(R3)
@@ -398,39 +927,68 @@ BOLT_VS_SHOT:	MOV	#ENTS,R3
 		MOV	#1,R0		; Z clear: the bolt scored
 		RETURN
 3$:		ADD	#E.SIZE,R3
-		SOB	R4,1$
+		DEC	BVSN
+		BNE	1$
 		MOV	ECUR,R5
 		CLR	R0
 		RETURN
 
 ; ------------------------------------------------------------------
 ; Draw the entity with 16x16 sprite frame R0 and mark its rectangle.
-ENT_SHOW:	MOVB	E.X(R5),R1
+ENT_SHOW:	MOV	R0,-(SP)
+		CALL	ENT_KIND
+		MOVB	KINDSH(R4),R2
+		BIC	#177400,R2
+		MOV	R2,SPRH
+		MOVB	KINDSW(R4),R2
+		BIC	#177400,R2
+		MOV	R2,SPRC
+		MOV	(SP)+,R0
+		MOVB	E.X(R5),R1
 		BIC	#177400,R1
 		MOVB	E.Y(R5),R2
 		BIC	#177400,R2
-		MOV	R1,-(SP)
-		MOV	R2,-(SP)
 		CALL	SPR_SMALL
-		MOV	(SP)+,R0	; y
-		ASR	R0
-		ASR	R0
-		ASR	R0
-		MOV	(SP)+,R1	; x
-		ASR	R1
-		ASR	R1
-		MOV	#4,R2
-		MOV	#3,R3
+		MOV	ECUR,R5
+		CALL	ENT_RECT
 		CALL	MARK_RECT
 		RETURN
 
 ; ------------------------------------------------------------------
-; Restore the background under every live entity (called before the
-; updates, so the erase always matches last frame's position).
-ENTS_ERASE:	MOV	#ENTS,R5
-		MOV	#NENT,R4
-1$:		TSTB	E.STATE(R5)
-		BEQ	2$
+; Draw a one-pixel entity and mark the single cell it lit.
+ENT_SHOWPIX:	MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		CALL	PIX_DRAW
+		MOV	ECUR,R5
+		CALL	ENT_RECT
+		CALL	MARK_RECT
+		RETURN
+
+; ------------------------------------------------------------------
+; What an entity covers, all out of the per-kind tables at the top.
+;   ENT_ISPIX  R5 -> R0 nonzero for a one-pixel kind
+;   ENT_RECT   R5 -> R0 row, R1 col, R2 width, R3 height (cells)
+;   ENT_BOX    R5 -> R2 width in x units, R3 height in pixels
+;   ENT_HOT    R5 -> R0 row, R1 col of the cell it collides in
+ENT_KIND:	MOVB	E.KIND(R5),R4
+		BIC	#177400,R4
+		CMP	R4,#NKIND
+		BLO	9$
+		CLR	R4
+9$:		RETURN
+
+ENT_ISPIX:	CALL	ENT_KIND
+		MOVB	KINDPIX(R4),R0
+		BIC	#177400,R0
+		RETURN
+
+ENT_RECT:	CALL	ENT_KIND
+		MOVB	KINDRW(R4),R2
+		BIC	#177400,R2
+		MOVB	KINDRH(R4),R3
+		BIC	#177400,R3
 		MOVB	E.Y(R5),R0
 		BIC	#177400,R0
 		ASR	R0
@@ -440,18 +998,68 @@ ENTS_ERASE:	MOV	#ENTS,R5
 		BIC	#177400,R1
 		ASR	R1
 		ASR	R1
-		MOV	#4,R2
-		MOV	#3,R3
-		MOV	R4,-(SP)
+		RETURN
+
+ENT_BOX:	CALL	ENT_KIND
+		MOVB	KINDW(R4),R2
+		BIC	#177400,R2
+		MOVB	KINDH(R4),R3
+		BIC	#177400,R3
+		RETURN
+
+ENT_HOT:	CALL	ENT_ISPIX
+		BNE	1$
+		MOVB	E.Y(R5),R0	; a sprite collides about its middle
+		BIC	#177400,R0
+		ADD	#4,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ADD	#2,R1
+		ASR	R1
+		ASR	R1
+		RETURN
+1$:		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		RETURN
+
+; ------------------------------------------------------------------
+; Restore the background under every live entity (called before the
+; updates, so the erase always matches last frame's position).
+; Marking the rectangle first and expanding it only when the mark was
+; new is what keeps a force field affordable: its energy balls all swirl
+; inside the same two cells, so seven of the eight erases would be the
+; same patch of background painted again.
+ENTS_ERASE:	MOV	#ENTS,R5
+		MOV	#NENT,R4
+1$:		TSTB	E.STATE(R5)
+		BEQ	2$
+		MOV	R4,-(SP)	; ENT_RECT needs R4 for the kind
 		MOV	R5,-(SP)
-		MOV	R0,-(SP)
+		CALL	ENT_RECT
+		MOV	R3,-(SP)
+		MOV	R2,-(SP)
 		MOV	R1,-(SP)
-		CALL	CELL_RECT
-		MOV	(SP)+,R1
-		MOV	(SP)+,R0
-		MOV	#4,R2
-		MOV	#3,R3
+		MOV	R0,-(SP)
 		CALL	MARK_RECT
+		TST	R4
+		BEQ	3$
+		MOV	@SP,R0
+		MOV	2(SP),R1
+		MOV	4(SP),R2
+		MOV	6(SP),R3
+		CALL	CELL_RECT
+3$:		CMP	(SP)+,(SP)+
+		CMP	(SP)+,(SP)+
 		MOV	(SP)+,R5
 		MOV	(SP)+,R4
 2$:		ADD	#E.SIZE,R5
@@ -475,17 +1083,7 @@ ENT_STEPX:	MOVB	E.T1(R5),R0
 		RETURN
 
 ; Collision class of the cell the entity is in -> R2.
-ENT_CELLCLASS:	MOVB	E.Y(R5),R0
-		BIC	#177400,R0
-		ADD	#4,R0
-		ASR	R0
-		ASR	R0
-		ASR	R0
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
-		ADD	#2,R1
-		ASR	R1
-		ASR	R1
+ENT_CELLCLASS:	CALL	ENT_HOT
 		CLR	R2
 		CMP	R0,#NROWS
 		BHIS	9$
@@ -497,22 +1095,136 @@ ENT_CELLCLASS:	MOVB	E.Y(R5),R0
 		MOV	R3,R2
 9$:		RETURN
 
-; Z clear when the entity overlaps the player's body.
-ENT_HITPLAYER:	TST	PDEAD
+; ------------------------------------------------------------------
+; The two edge tests the original runs for anything that flies through
+; scenery (0x9362 / 0x9382 sideways, 0x93A2 / 0x93C2 up and down): the
+; map is only read when the coordinate sits on a cell boundary, and the
+; neighbouring cell as well when the sprite straddles two.  R5 = the
+; entity; both return R0 = 0 when the way is clear and leave ECUR in R5.
+GRROW:		.WORD	0
+GRCOL:		.WORD	0
+GRSPAN:		.WORD	0
+GRACC:		.WORD	0
+GRDELTA:	.WORD	0
+
+; the cell it is about to move into, in its own direction of travel
+GREN_WALL:	MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		MOV	R0,R1
+		BIC	#177774,R1
 		BNE	9$
+		ASR	R0
+		ASR	R0
+		TSTB	E.T1(R5)
+		BLE	1$
+		INC	R0
+		BR	2$
+1$:		DEC	R0
+2$:		MOV	R0,GRCOL
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		MOV	R0,R1
+		BIC	#177770,R1
+		MOV	R1,GRSPAN
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOV	R0,GRROW
+		MOV	GRCOL,R1
+		CALL	MAP_BLOCK
+		MOV	R0,GRACC
+		TST	GRSPAN
+		BEQ	3$
+		MOV	GRROW,R0
+		INC	R0
+		MOV	GRCOL,R1
+		CALL	MAP_BLOCK
+		BIS	R0,GRACC
+3$:		MOV	GRACC,R0
+		MOV	ECUR,R5
+		TST	R0
+		RETURN
+9$:		MOV	ECUR,R5
+		CLR	R0
+		RETURN
+
+; the cell row R4 (a signed delta) away from the one it is in
+ENT_VWALL:	MOV	R4,GRDELTA
+		MOVB	E.Y(R5),R0
+		BIC	#177400,R0
+		MOV	R0,R1
+		BIC	#177770,R1
+		BNE	9$
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		ADD	GRDELTA,R0
+		MOV	R0,GRROW
 		MOVB	E.X(R5),R0
 		BIC	#177400,R0
-		SUB	PX,R0
-		CMP	R0,#-4
+		MOV	R0,R1
+		BIC	#177774,R1
+		MOV	R1,GRSPAN
+		ASR	R0
+		ASR	R0
+		MOV	R0,GRCOL
+		MOV	GRROW,R0
+		MOV	GRCOL,R1
+		CALL	MAP_BLOCK
+		MOV	R0,GRACC
+		TST	GRSPAN
+		BEQ	3$
+		MOV	GRROW,R0
+		MOV	GRCOL,R1
+		INC	R1
+		CALL	MAP_BLOCK
+		BIS	R0,GRACC
+3$:		MOV	GRACC,R0
+		MOV	ECUR,R5
+		TST	R0
+		RETURN
+9$:		MOV	ECUR,R5
+		CLR	R0
+		RETURN
+
+; ------------------------------------------------------------------
+; Z clear when the entity overlaps the player's body.  The box is the
+; kind's own, and crouching lifts its top by the six lines frame 10
+; drops the head - which is what lets a shot aimed along the standing
+; player's head pass over him.
+PL_DUCKTOP = 6.
+
+ENT_HITPLAYER:	TST	PDEAD
+		BNE	9$
+		CALL	ENT_BOX		; R2 = width (units), R3 = height (px)
+		MOVB	E.X(R5),R0
+		BIC	#177400,R0
+		MOV	R0,R1
+		ADD	R2,R1
+		DEC	R1		; entity x1
+		MOV	PX,R4
+		INC	R4		; player x0
+		CMP	R1,R4
 		BLT	9$
-		CMP	R0,#12.
+		MOV	PX,R4
+		ADD	#10.,R4		; player x1
+		CMP	R0,R4
 		BGT	9$
 		MOVB	E.Y(R5),R0
 		BIC	#177400,R0
-		SUB	PY,R0
-		CMP	R0,#-12.
+		MOV	R0,R1
+		ADD	R3,R1
+		DEC	R1		; entity y1
+		MOV	PY,R4
+		INC	R4		; player y0
+		TST	PDUCK
+		BEQ	1$
+		ADD	#PL_DUCKTOP-1,R4
+1$:		CMP	R1,R4
 		BLT	9$
-		CMP	R0,#28.
+		MOV	PY,R4
+		ADD	#PL_FOOT,R4	; player y1
+		CMP	R0,R4
 		BGT	9$
 		MOV	#1,R0		; Z clear: hit
 		RETURN
@@ -520,63 +1232,67 @@ ENT_HITPLAYER:	TST	PDEAD
 		RETURN
 
 ; ------------------------------------------------------------------
-; A grenade clears the destructible scenery around it: every cell of
-; class 1 in a 3x3 block loses its tile.
-GREN_BLAST:	MOVB	E.Y(R5),R0
+; Objects a laser bolt cannot open up: the gun emplacements and the
+; rock formations that block the way out of a zone.  Z clear = the
+; object at R3 needs a grenade.  Preserves R3.
+OBJ_GRENONLY:	MOVB	O.OBJ(R3),R2
+		BIC	#177600,R2		; ignore the destroyed flag
+		CMP	R2,#OB_CANNON
+		BEQ	1$
+		CMP	R2,#OB_GUN
+		BEQ	1$
+		CMP	R2,#OB_ROCK
+		BEQ	1$
+		CLR	R2			; Z set: a bolt may take it
+		RETURN
+1$:		MOV	#1,R2
+		RETURN
+
+; ------------------------------------------------------------------
+; What a grenade actually destroys (0x93E2): the one live object whose
+; bounding box holds the cell it went off in - and nothing else.  The
+; original does not open holes in plain scenery, so neither does this:
+; the way out of a blocked zone is the rock formation, which is a live
+; object, and so are the emplacements a bolt cannot touch.
+GBOBJ:		.WORD	0
+GBN:		.WORD	0
+GBROW:		.WORD	0
+GBCOL:		.WORD	0
+
+GREN_BLAST:	MOV	ECUR,R5
+		CALL	ENT_HOT			; blast centre, in cells
+		MOV	R0,GBROW
+		MOV	R1,GBCOL
+		MOV	NLIVE,R4
+		BEQ	29$
+		MOV	R4,GBN
+		MOV	#OBJLIST,R3
+20$:		MOVB	O.OBJ(R3),R0
+		BIT	#200,R0
+		BNE	25$			; already gone
+		MOVB	O.X0(R3),R0
 		BIC	#177400,R0
-		ASR	R0
-		ASR	R0
-		ASR	R0
-		DEC	R0
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
-		ASR	R1
-		ASR	R1
-		DEC	R1
-		MOV	#3,R3
-1$:		MOV	R1,-(SP)
-		MOV	#3,R2
-2$:		MOV	R0,-(SP)
-		MOV	R1,-(SP)
-		MOV	R2,-(SP)
-		MOV	R3,-(SP)
-		CMP	R0,#NROWS
-		BHIS	3$
-		CMP	R1,#NCOLS
-		BHIS	3$
-		CALL	CELLADDR
-		CMPB	C.SOLID(R2),#1
-		BNE	3$
-		CLRB	C.SOLID(R2)
-		CLRB	C.SLOT(R2)
-3$:		MOV	(SP)+,R3
-		MOV	(SP)+,R2
-		MOV	(SP)+,R1
-		MOV	(SP)+,R0
-		INC	R1
-		SOB	R2,2$
-		MOV	(SP)+,R1
-		INC	R0
-		SOB	R3,1$
-		MOVB	E.Y(R5),R0
+		CMP	R0,GBCOL
+		BGT	25$
+		MOVB	O.X1(R3),R0
 		BIC	#177400,R0
-		ASR	R0
-		ASR	R0
-		ASR	R0
-		DEC	R0
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
-		ASR	R1
-		ASR	R1
-		DEC	R1
-		MOV	R0,-(SP)
-		MOV	R1,-(SP)
-		MOV	#3,R2
-		MOV	#3,R3
-		CALL	CELL_RECT
-		MOV	(SP)+,R1
-		MOV	(SP)+,R0
-		MOV	#3,R2
-		MOV	#3,R3
-		CALL	MARK_RECT
+		CMP	R0,GBCOL
+		BLT	25$
+		MOVB	O.Y0(R3),R0
+		BIC	#177400,R0
+		CMP	R0,GBROW
+		BGT	25$
+		MOVB	O.Y1(R3),R0
+		BIC	#177400,R0
+		CMP	R0,GBROW
+		BLT	25$
+		MOV	R3,GBOBJ
+		CALL	OBJ_CLEAR
+		CALL	SCORE_HIT
+		MOV	ECUR,R5
+		RETURN
+25$:		ADD	#O.SIZE,R3
+		DEC	GBN
+		BNE	20$
+29$:		MOV	ECUR,R5
 		RETURN
