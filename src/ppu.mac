@@ -586,6 +586,8 @@ KEYON_CODES:	.WORD	4,100000	; STOP
 		.WORD	113,40		; space = P1 fire too
 		.WORD	166,40*400	; aux ENTER (P2 fire)
 		.WORD	6,200		; AP2
+		.WORD	30,100		; '1' - menu: start
+		.WORD	31,10000	; '2' - menu: toggle infinite lives
 		.WORD	0,0
 
 KEYOFF_CODES:	.WORD	4,100000	; STOP
@@ -594,6 +596,8 @@ KEYOFF_CODES:	.WORD	4,100000	; STOP
 		.WORD	16,10*400+10	; LEFT
 		.WORD	7,40		; FIKS
 		.WORD	6,40*400+200+40	; AP2 + aux ENTER
+		.WORD	10,100		; '1'  (the keyboard releases with the
+		.WORD	11,10000	; '2'   press code's low nibble)
 		.WORD	0,0
 
 K1_SAVE:	.BLKW	1

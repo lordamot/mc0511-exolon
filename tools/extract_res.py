@@ -254,6 +254,7 @@ SMALL_BANK_FRAMES = {           # sheet frame -> bank frame
     49: 3,                      # spark, three sizes (0x9864 picks between
     50: 4,                      # them as the spark's counter runs out)
     51: 5,
+    52: 8,                      # a wall emitter's shot
 }
 
 EXTRA_SMALL = {
@@ -291,7 +292,9 @@ TITLE|EXOLON
 AUTHOR|BY RAFFAELE CECCO
 PORT|UKNC PORT
 START|1 START GAME
-KEYS|2 REDEFINE KEYS
+LIVESOPT|2 INFINITE LIVES
+ON|ON
+OFF|OFF
 COPY|HEWSON 1987
 AMMO|AMMO
 GREN|GRENADES
@@ -332,7 +335,7 @@ def main():
         RES / "sprites/small.txt": lambda p: write_sprites(
             mem, p, SMALL_ORG, SMALL_FRAMES, SMALL_W, SMALL_H,
             "16x16 sprites (0..9 explosion, 10..15 rockets and missiles, "
-            "16..19 energy balls, 36 the rocket that hunts a player who\n; lingers, 45 the player's bolt, 46/47 a grenade, 48 an energy ball,\n; 49..51 sparks)",
+            "16..19 energy balls, 36 the rocket that hunts a player who\n; lingers, 45 the player's bolt, 46/47 a grenade, 48 an energy ball,\n; 49..51 sparks, 52 a wall emitter's shot)",
             small_extra(mem)),
         RES / "text/strings.txt": lambda p: p.write_text(STRINGS),
     }

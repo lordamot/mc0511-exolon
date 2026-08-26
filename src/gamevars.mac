@@ -56,6 +56,7 @@ POLDY:		.BLKW	1
 POLDF:		.BLKW	1
 
 ; ---- score / status ---------------------------------------------
+CHEAT:		.BLKW	1	; nonzero = infinite lives (menu option 2)
 AMMO:		.BLKW	1
 GRENADES:	.BLKW	1
 LIVES:		.BLKW	1
@@ -76,6 +77,9 @@ TPCOL:		.BLKW	NSPEC
 NSUITP:		.BLKW	1	; power-suit booths (0..NSPEC)
 SUITROW:	.BLKW	NSPEC
 SUITCOL:	.BLKW	NSPEC
+NEMIT:		.BLKW	1	; wall emitters in this zone (0..EMITMAX)
+EMITROW:	.BLKW	EMITMAX
+EMITCOL:	.BLKW	EMITMAX
 NMINE:		.BLKW	1	; the zone has a mine throwing missiles
 MINEROW:	.BLKW	1	; and the cell it is anchored in
 MINECOL:	.BLKW	1

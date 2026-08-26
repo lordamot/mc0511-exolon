@@ -94,14 +94,15 @@ Ported subsystem by subsystem from the RE:
   down their own row on the original's random trigger and play its
   eight-frame recoil, rocket banks launch when the player comes near,
   dishes and hoppers lob at him.  A force field fills its ring with
-  drifting energy balls, a mine keeps a homing missile coming in from
-  the right, and a player who stays in one zone too long gets a rocket
-  sent after him.  Rocks, trees and mines kill on contact through their
-  collision class.
+  drifting energy balls, the guns bolted to a wall spit along their own
+  row, a mine keeps a homing missile coming in from the right, and a
+  player who stays in one zone too long gets a rocket sent after him.
+  Rocks, trees and mines kill on contact through their collision class.
 - **HUD** - AMMO / GRENADES / POINTS / LIVES / ZONES, drawn from the
   same 8x8 font as the original.
 - **flow** - death animation and respawn, lives, game over, the zone
-  counter, the menu and the title screen.
+  counter, and the title screen, which starts a game on "1" as the
+  original's does and adds infinite lives on "2".
 
 ## Resources (all editable text under src/res/)
 
@@ -128,7 +129,11 @@ they are the editable source of truth.
 
 `make build`: generators -> `build/*.mac`, concatenate per
 `src/exolon.list`, `bin/macro11 -yus -ysl 64`, `tools/obj2bin.py`,
-`tools/dsk_build.py` -> `build/exolon.dsk`.  `make run` opens the SDL
+`tools/dsk_build.py` -> `build/exolon.dsk`.  On the disk, LBA 0 is the
+boot sector, LBA 1 an RT-11 home block whose volume identification
+names the disk EXOLON (`tools/rt11_home.py`), and the rest of the
+program follows from LBA 2, which is where the loader's parameter block
+in `boot.mac` looks for it.  `make run` opens the SDL
 player, `make shot` / `make demo` drive the headless emulator, and
 `make verify` round-trips the resources and boots the image.
 
@@ -145,8 +150,18 @@ player, `make shot` / `make demo` drive the headless emulator, and
 9. the animation and behaviour passes: facing, the grenade's arc and
    smoke, the emplacement recoil, the teleport shower, force-field
    energy balls, mine missiles, the lingering-player rocket [DONE]
+10. the wall emitters, the menu's two options, right-facing frames
+    mirrored when they fly left, and the disk's name [DONE]
 
 ## Notes from the implementation
+
+- **Three things face the wrong way in the original, and only one of
+  them is a bug.**  The player sheet has a single facing and the ZX
+  plotter cannot mirror, so Vitorc walks left backwards; the missiles
+  and the hunting rocket are drawn from right-facing frames and only
+  ever fly left.  The port mirrors all of them, through one 256-byte
+  bit-reversal table: `SPRMIR` turns the player round, and `KINDMIR` in
+  `shots.mac` turns an entity round whenever its x step is negative.
 
 - **Vitorc turns round, and the original's Vitorc does not.**  The ZX
   sheet has one facing and the plotter at 0x76DA has no mirror path, so

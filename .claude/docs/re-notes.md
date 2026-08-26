@@ -229,6 +229,11 @@ count out to sixteen with the blank, so the frame takes the same time
 however much is on screen; 0x9EAE/0x9E99 do the same for the 16x16
 plotter, to six.
 
+**Some frames are drawn backwards.**  The missiles (10, 11) and the
+rocket that hunts a lingering player (36) all face right, and every one
+of them only ever flies left; Cecco drew them tail first rather than
+spend the bytes on a second facing.  The port mirrors them instead.
+
 ## Bullets
 
 List of 3-byte records {E, D, step} at 0x845F, updated at 0x83DD and
@@ -372,6 +377,23 @@ unless 0x93A2 / 0x93C2 says the cell that way is solid.  The ring's own
 cells are solid, so they swirl inside it.  They are drawn as frame 7 of
 the 16x8 bank; 0x9B52 lets a laser bolt pop one for points and 0x9BB4
 kills the player who touches one.
+
+## Wall emitters (class 11, list 0x9DC1, fired at 0x9D7F)
+
+Objects 26 and 45 - the guns bolted to a wall, one of them a stacked
+pair - write class 11 on their muzzle cells and class 14 on the barrel
+beside them, and the class scan leaves the map passable at both.  Each
+class-11 cell is an independent gun: every frame it draws a random byte
+and fires when the byte is >= 0xF7, about one frame in thirty, and only
+while the player is still more than 0x1E units to its left.  The shot
+goes into the ten 3-byte slots at 0x9E18 as {x = col*4 - 2, y = row*8,
+step = -2}, is flown left by 0x9DD6 until it runs off the edge, kills
+the player on a 4-by-8 box (0x9E64) and can be shot out of the air by
+a laser bolt (0x9E37), which scores.  It is drawn as frame 8 of the
+16x8 bank.
+
+Class 14, the barrel cells, only knock themselves out when the player
+walks into them (0xA30B) - no damage either way.
 
 ## Mines (class 13, 0xA23A launch, 0xA26B fly)
 

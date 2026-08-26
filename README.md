@@ -33,25 +33,35 @@ make verify    # resource round-trip against the original, generator
 make extract   # re-extract every resource from EXOLON.TAP (destructive)
 ```
 
-In `make run` the firmware boot menu loads the disk by itself.  The
-title screen waits for ENTER or fire.
+In `make run` the firmware boot menu loads the disk by itself (the disk
+answers to the name `EXOLON`).  The title screen carries the original's
+two numbered options:
 
 | Key | Action |
 |---|---|
-| ← → | walk |
+| 1 | start the game |
+| 2 | infinite lives on / off |
+
+and in play:
+
+| Key | Action |
+|---|---|
+| ← → | walk - Vitorc turns to face the way he is going |
 | ↑ | jump; in a teleport booth or a suit booth, use it |
 | ↓ | crouch - a gun emplacement's shot passes over you |
 | ФИКС (LCtrl) or space | fire the laser |
 | numpad ВВОД (RCtrl) | throw a grenade |
-| ENTER | start / confirm |
+| АП2 | pause |
 | СТОП | leave the game |
 
 Walk off the right of a zone to reach the next one.  Gun emplacements
 fire down their own row - always to the left, the side you come from -
-and rock back as they do; crouch and the shot goes over your head.
-Force fields fill their rings with energy balls that swirl about and
-kill on contact, and mines throw a missile in from the right that comes
-down to your own height, over and over, until you shoot the mine out.
+and rock back as they do; crouch and the shot goes over your head.  The
+guns bolted to the walls, singly and in pairs, spit along their own row
+at you as you come; force fields fill their rings with energy balls
+that swirl about and kill on contact; and mines throw a missile in from
+the right that comes down to your own height, over and over, until you
+shoot the mine out.
 
 A laser bolt shoots down what is in the air, destroys the moving
 enemies and pops the energy balls, but the gun emplacements and the
@@ -103,14 +113,18 @@ power suit are worked with the up arrow exactly as on the Spectrum.
 See `.claude/docs/re-notes.md` for where each of those lives in the
 original.
 
-Two things are deliberately **not** the original.  Vitorc turns round:
-the Spectrum sheet holds one facing and its plotter cannot mirror, so
-there he walks left backwards, while the port reverses each line of the
-frame through a lookup table.  And a force field emits six energy balls
-rather than eight - on this machine a moving sprite costs several times
-what the Spectrum's XOR plotter did, the balls all swirl inside the
-ring's two cells and overlap into one blob anyway, and the two extra
-would have cost a fifth of the frame rate in those zones.
+Three things are deliberately **not** the original.  Everything turns
+round: the Spectrum sheet holds one facing for the player and its
+plotter cannot mirror, so there Vitorc walks left backwards and the
+missiles and the hunting rocket fly tail first - the port reverses each
+line of the frame through a lookup table instead.  A force field emits
+six energy balls rather than eight, because on this machine a moving
+sprite costs several times what the Spectrum's XOR plotter did, the
+balls all swirl inside the ring's two cells and overlap into one blob
+anyway, and the two extra would have cost a fifth of the frame rate in
+those zones.  And the title screen's second option is infinite lives
+rather than REDEFINE KEYS, which a machine with one keyboard layout
+does not need.
 
 ## The machine, and what it does to the graphics
 
@@ -169,11 +183,11 @@ carried an AY score that the 48K one never played, and
 | `zone_render.py` | render a zone (or a contact sheet) from the resources, in ZX or UKNC colours |
 | `tiles_gen.py` `objects_gen.py` `zones_gen.py` `sprites_gen.py` `text_gen.py` `music_gen.py` | resource -> MACRO-11 |
 | `music_extract.py` | decode the original's three AY streams into `res/music/title.txt` |
-| `obj2bin.py` `dsk_build.py` | link a flat image, lay out the raw disk |
+| `obj2bin.py` `dsk_build.py` `rt11_home.py` | link a flat image, lay out the raw disk, give it its name |
 | `uknc_control.py` | drive the headless UKNC emulator (boot, keys, screenshots, memory dumps, audio capture) |
 | `zx_control.py` | drive ZEsarUX on the original tape (keys, screenshots, memory dumps) |
 | `tap_extract.py` `z80dis.py` `z80_disasm.py` `z80_trace.py` `zx_view.py` | the ZX side: tape blocks, disassembly, code/data tracing, graphics viewing |
-| `verify_build.py` | the checks behind `make verify`, scripted gameplay runs included (facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, mine missiles, the lingering-player rocket) |
+| `verify_build.py` | the checks behind `make verify`, scripted runs of the title screen and of gameplay included (the menu's two options, facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, wall guns, mine missiles, the lingering-player rocket) |
 | `build_toolchain.py` | rebuild `bin/` from source |
 
 Resources are the source of truth.  Edit `src/res/zones/zones.txt`
@@ -183,9 +197,10 @@ line), `src/res/tiles/tiles.txt` (`#` bitmaps),
 `src/res/sprites/*.txt` or `src/res/music/title.txt` and rebuild.
 `make extract` regenerates them from the tape, including frame 45 of
 `small.txt` (the laser bolt, which the original drew as a bare pattern)
-and frames 46..51, which are the grenade, the energy ball and the three
-sparks copied in from the original's *second*, 16x8 sprite bank at
-0xED40 - the port has one sprite format where the Spectrum had two.
+and frames 46..52, which are the grenade, the energy ball, the three
+sparks and a wall gun's shot, copied in from the original's *second*,
+16x8 sprite bank at 0xED40 - the port has one sprite format where the
+Spectrum had two.
 
 ## Credits
 

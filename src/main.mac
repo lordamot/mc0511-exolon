@@ -16,6 +16,7 @@ MAIN_START:	MOV	#STACK_TOP,SP
 		CLR	KEYS
 		CLR	KEYPREV
 		MOV	#1,RNDSEED
+		CLR	CHEAT
 		CLR	ROCKACT
 		CALL	REV_INIT	; byte -> reversed bits, for facing left
 		CALL	PP_MAIN_LOAD	; PPU: line table, colours, sound

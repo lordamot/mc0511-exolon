@@ -22,7 +22,8 @@ EK_BALL	= 7.		; a force field's drifting energy ball (0x9A23)
 EK_ROCK	= 8.		; the rocket that hunts a lingerer (0xAC7D)
 EK_TPFX	= 9.		; a teleport pad's spark emitter (0x9EEE)
 EK_MINE	= 10.		; a mine's homing missile (0xA26B)
-NKIND	= 11.
+EK_EMIT	= 11.		; a wall emitter's bolt (0x9D7F / 0x9DD6)
+NKIND	= 12.
 
 SPR_GRENR = 46.		; the grenade in flight, facing right and left
 SPR_GRENL = 47.
@@ -31,6 +32,7 @@ SPR_MISL = 10.		; missile from the original's 16x16 set
 SPR_ROCK = 36.		; the rocket that hunts a lingering player
 SPR_MINE = 10.		; a mine's missile, closing and then bearing down
 SPR_MINE2 = 11.
+SPR_EMIT = 52.		; a wall emitter's bolt
 
 ; The 16x16 bank holds two halves of an explosion: 12..15 is the flash
 ; opening up and 5..9 the sparks thinning out (frame 0 is blank - the
@@ -80,15 +82,21 @@ GRENMAXX = 118.		; it cannot be thrown any closer to the right edge
 ; KINDRW/H the cell rectangle the kind covers, for erase and blit
 ; KINDW/H  its collision box, x units and pixels - the numbers the
 ;          original passes to 0x9BD6 in BC
-KINDPIX:	.BYTE	0,1,1,0,0,0,0,0,0,1,0
-KINDRW:		.BYTE	1,1,1,3,4,4,2,2,4,1,4
-KINDRH:		.BYTE	1,1,1,2,3,3,2,2,3,1,3
-KINDW:		.BYTE	1,1,1,8.,8.,8.,1,4.,16.,1,16.
-KINDH:		.BYTE	1,1,1,8.,16.,16.,1,8.,8.,1,8.
+KINDPIX:	.BYTE	0,1,1,0,0,0,0,0,0,1,0,0
+KINDRW:		.BYTE	1,1,1,3,4,4,2,2,4,1,4,2
+KINDRH:		.BYTE	1,1,1,2,3,3,2,2,3,1,3,2
+KINDW:		.BYTE	1,1,1,8.,8.,8.,1,4.,16.,1,16.,4.
+KINDH:		.BYTE	1,1,1,8.,16.,16.,1,8.,8.,1,8.,8.
 ; how much of a 16x16 frame actually holds anything: lines, and cells
 ; across (an eight-pixel frame spans two cells at any sub-cell shift)
-KINDSH:		.BYTE	8.,8.,8.,8.,16.,16.,8.,8.,16.,8.,16.
-KINDSW:		.BYTE	2,2,2,2,4,4,2,2,4,2,4
+KINDSH:		.BYTE	8.,8.,8.,8.,16.,16.,8.,8.,16.,8.,16.,8.
+KINDSW:		.BYTE	2,2,2,2,4,4,2,2,4,2,4,2
+; The missiles and the hunting rocket are drawn from frames that face
+; right - the original reused them for things that only ever fly left,
+; and drew them backwards.  This port turns them round instead, the way
+; it turns the player round, so a kind marked here is mirrored whenever
+; its x step is negative.
+KINDMIR:	.BYTE	0,0,0,0,0,1,0,0,1,0,1,0
 		.EVEN
 
 EN_TAB:		.WORD	EN_KILL		; 0: never happens
@@ -102,6 +110,7 @@ EN_TAB:		.WORD	EN_KILL		; 0: never happens
 		.WORD	EN_ROCK
 		.WORD	EN_TPFX
 		.WORD	EN_MINE
+		.WORD	EN_EMIT
 
 ENTS_CLEAR:	MOV	#ENTS,R0
 		MOV	#E.SIZE*NENT,R1
@@ -752,6 +761,62 @@ EN_MINE:	MOV	MINEROW,R0
 
 MINEFR:		.WORD	0
 
+; ---- wall emitters ------------------------------------------------
+; 0x9D7F: every frame each emitter draws a random byte and spits a bolt
+; down its own row when the byte is high enough and the player is still
+; well to the left of it.  0x9DD6 flies the bolt straight left until it
+; runs off the edge; it kills on contact and a laser bolt shoots it down
+; (0x9E37), which is the pair of guns that used to do nothing at all.
+EMITI:		.WORD	0
+
+EMIT_CHECK:	TST	NEMIT
+		BEQ	9$
+		TST	PDEAD
+		BNE	9$
+		CLR	EMITI
+1$:		CALL	RANDOM
+		CMP	R0,#EMIT_FIRE
+		BLO	5$
+		MOV	EMITI,R0
+		ASL	R0
+		MOV	EMITCOL(R0),R1
+		ASL	R1
+		ASL	R1
+		SUB	#2,R1		; muzzle x = col*4 - 2
+		BLT	5$
+		MOV	R1,R2
+		SUB	#EMIT_NEAR,R2
+		BLE	5$
+		CMP	PX,R2		; only at a player still approaching
+		BHIS	5$
+		MOV	EMITI,R0
+		ASL	R0
+		MOV	EMITROW(R0),R2
+		ASL	R2
+		ASL	R2
+		ASL	R2		; muzzle line = row*8
+		MOV	#EMIT_STEP,R4
+		MOV	#EK_EMIT,R0
+		CALL	ENT_SPAWN
+		MOV	#SFX_SHOT,SND_REQ
+5$:		INC	EMITI
+		CMP	EMITI,NEMIT
+		BLO	1$
+9$:		RETURN
+
+EN_EMIT:	CALL	ENT_STEPX
+		BNE	1$
+		JMP	EN_KILL
+1$:		MOV	ECUR,R5
+		CALL	ENT_HITPLAYER
+		BEQ	2$
+		CALL	PLAYER_KILL
+		MOV	ECUR,R5
+		JMP	EN_KILL
+2$:		MOV	ECUR,R5
+		MOV	#SPR_EMIT,R0
+		JMP	ENT_SHOW
+
 ; ------------------------------------------------------------------
 EN_KILL:	MOV	ECUR,R3		; it may already be on screen this
 		CALL	ENT_WIPE	; frame, so put the background back
@@ -891,6 +956,8 @@ BOLT_VS_SHOT:	MOV	#ENTS,R3
 		CMP	R0,#EK_MISL
 		BEQ	2$
 		CMP	R0,#EK_BALL
+		BEQ	2$
+		CMP	R0,#EK_EMIT
 		BNE	3$
 2$:		MOV	R3,BVSOBJ	; measure against the target's own box
 		MOV	R3,R5
@@ -943,7 +1010,13 @@ ENT_SHOW:	MOV	R0,-(SP)
 		MOVB	KINDSW(R4),R2
 		BIC	#177400,R2
 		MOV	R2,SPRC
-		MOV	(SP)+,R0
+		CLR	SPRMIR
+		MOVB	KINDMIR(R4),R2
+		BEQ	1$
+		TSTB	E.T1(R5)	; a right-facing frame flying left
+		BGE	1$
+		MOV	#1,SPRMIR
+1$:		MOV	(SP)+,R0
 		MOVB	E.X(R5),R1
 		BIC	#177400,R1
 		MOVB	E.Y(R5),R2

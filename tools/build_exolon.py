@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 PROG_SIZE = 0o110000        # must match PROG_SIZE in src/defs.mac
 DISK_SIZE = 819200
+SECTOR = 512
+VOLUME = "EXOLON"           # the disk's name, in the RT-11 home block
 
 
 def run(*cmd):
@@ -67,12 +69,23 @@ def main():
     run(py, "tools/obj2bin.py", "build/exolon.obj", "build/exolon.raw",
         "--size", str(PROG_SIZE))
 
+    # LBA 0 is the boot sector, LBA 1 the RT-11 home block that names the
+    # disk, and the rest of the program follows from LBA 2 (the loader's
+    # parameter block in src/boot.mac says the same).
+    raw = (BUILD / "exolon.raw").read_bytes()
+    (BUILD / "boot.raw").write_bytes(raw[:SECTOR])
+    (BUILD / "main.raw").write_bytes(raw[SECTOR:])
+    run(py, "tools/rt11_home.py", "build/home.raw",
+        "--volume", VOLUME, "--force")
+
     manifest = {"geometry": {"size": DISK_SIZE},
-                "entries": [{"file": "exolon.raw", "lba": 0,
-                             "sectors": PROG_SIZE // 512}]}
+                "entries": [{"file": "boot.raw", "lba": 0, "sectors": 1},
+                            {"file": "home.raw", "lba": 1, "sectors": 1},
+                            {"file": "main.raw", "lba": 2,
+                             "sectors": PROG_SIZE // SECTOR - 1}]}
     (BUILD / "manifest.json").write_text(json.dumps(manifest, indent=1))
     run(py, "tools/dsk_build.py", "build/manifest.json", out, "--force")
-    print(f"{out}: OK ({PROG_SIZE} byte program)")
+    print(f"{out}: OK ({PROG_SIZE} byte program, volume {VOLUME})")
 
 
 if __name__ == "__main__":

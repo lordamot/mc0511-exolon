@@ -319,8 +319,7 @@ SPR_PLAYER:	CLR	SPRH
 ; SPRH are actually drawn - most of the frames this port added to the
 ; sheet are eight lines tall, and drawing the blank half of one costs as
 ; much as drawing the half that shows.
-SPR_SMALL:	CLR	SPRMIR
-		MOV	R0,R4
+SPR_SMALL:	MOV	R0,R4
 		ASL	R4
 		ASL	R4
 		ASL	R4
@@ -463,23 +462,31 @@ SPR_SETNOT:	MOV	SPRY,R0
 
 SLOTNOT:	.WORD	0,177400,377,0	; slot -> planes to suppress
 
-; Mirror one 24-pixel line: the outer bytes swap ends and every byte has
-; its bits reversed.  R0 = bytes 0 and 1, R1 = byte 2.
+; Mirror one line across the frame's own width: the outer bytes swap
+; ends and every byte has its bits reversed.  R0 = bytes 0 and 1,
+; R1 = byte 2 (zero for the 16-pixel frames).
 SPR_FLIP:	MOV	R0,R2
 		BIC	#177400,R2	; byte 0
 		MOVB	REVTAB(R2),R2
 		BIC	#177400,R2
-		MOV	R2,SPRB0	; -> the new byte 2
+		MOV	R2,SPRB0
 		MOV	R0,R2
 		SWAB	R2
 		BIC	#177400,R2	; byte 1
 		MOVB	REVTAB(R2),R2
 		BIC	#177400,R2
-		SWAB	R2
+		CMP	TMPA,#3
+		BEQ	1$
+		SWAB	SPRB0		; 16 pixels: the two bytes swap
+		BIS	SPRB0,R2
+		MOV	R2,R0
+		CLR	R1
+		RETURN
+1$:		SWAB	R2		; 24: byte 1 stays in the middle
 		MOVB	REVTAB(R1),R0	; byte 2 -> the new byte 0
 		BIC	#177400,R0
 		BIS	R2,R0
-		MOV	SPRB0,R1
+		MOV	SPRB0,R1	; byte 0 -> the new byte 2
 		RETURN
 
 ; ------------------------------------------------------------------

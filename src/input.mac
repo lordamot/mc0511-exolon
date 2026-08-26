@@ -10,7 +10,9 @@ K_DOWN	= 4		; arrow down  - crouch
 K_LEFT	= 10
 K_ENTER	= 20		; menu select
 K_FIRE	= 40		; ФИКС or space
+K_1	= 100		; '1' - menu: start a game
 K_PAUSE	= 200		; АП2
+K_2	= 10000		; '2' - menu: infinite lives on / off
 K_GREN	= 20000		; numpad ВВОД - grenade
 K_STOP	= 100000
 

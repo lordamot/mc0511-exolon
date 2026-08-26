@@ -180,6 +180,7 @@ GAME_RUN:	CALL	GAME_START
 		CALL	ENEMY_UPD
 		CALL	ROCK_CHECK
 		CALL	MINE_CHECK
+		CALL	EMIT_CHECK
 		CALL	ENTS_UPD
 		CALL	PL_SHOW
 		CALL	HUD_UPD
@@ -324,23 +325,29 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		MOV	#8.,R2
 		CALL	RUN_LIST
 		CALL	TITLE_INKS
-		MOV	#8.,R0
-		MOV	#7,R1
+		MOV	#6,R0		; the menu: two credit lines and the
+		MOV	#7,R1		; original's own two numbered options
 		MOV	#2,R2
 		MOV	#S_AUTHOR,R3
 		CALL	PRINT_STR
-		MOV	#10.,R0
+		MOV	#8.,R0
 		MOV	#11.,R1
 		MOV	#1,R2
 		MOV	#S_PORT,R3
 		CALL	PRINT_STR
-		MOV	#12.,R0
-		MOV	#10.,R1
+		MOV	#10.,R0
+		MOV	#6,R1
 		MOV	#3,R2
 		MOV	#S_START,R3
 		CALL	PRINT_STR
+		MOV	#CH_ROW,R0
+		MOV	#6,R1
+		MOV	#3,R2
+		MOV	#S_LIVESOPT,R3
+		CALL	PRINT_STR
+		CALL	MENU_CHEAT
 		MOV	#14.,R0
-		MOV	#8.,R1
+		MOV	#10.,R1
 		MOV	#2,R2
 		MOV	#S_COPY,R3
 		CALL	PRINT_STR
@@ -353,8 +360,55 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		MOV	#1,SND_MODE	; the title tune plays in the PPU
 2$:		CALL	VSYNC
 		CALL	INPUT_READ
-		MOV	#K_ENTER!K_FIRE,R0
+		MOV	#K_2,R0		; '2' toggles infinite lives
+		CALL	KEY_EDGE
+		BEQ	5$
+		MOV	#1,R0
+		XOR	R0,CHEAT
+		CALL	MENU_CHEAT
+		CALL	MENU_SHOWCH
+5$:		MOV	#K_1,R0		; '1' starts, as the menu says
 		CALL	KEY_EDGE
 		BEQ	2$
 		CLR	SND_MODE
+		RETURN
+
+; ------------------------------------------------------------------
+; The state of menu option 2, at the end of its line.  Written into the
+; cell buffer only - MENU expands and blits the whole screen after the
+; first call, and MENU_SHOWCH does the three cells after a toggle.
+CH_ROW	= 12.
+CH_COL	= 23.
+
+MENU_CHEAT:	MOV	#CH_COL,MENUC	; blank it first: ON is shorter than
+1$:		MOV	#CH_ROW,R0	; OFF, and CELL_SET keeps no registers
+		MOV	MENUC,R1
+		CLR	R2
+		CLR	R4		; an empty cell
+		CALL	CELL_SET
+		INC	MENUC
+		CMP	MENUC,#CH_COL+3
+		BLO	1$
+		MOV	#S_OFF,R3
+		TST	CHEAT
+		BEQ	2$
+		MOV	#S_ON,R3
+2$:		MOV	#CH_ROW,R0
+		MOV	#CH_COL,R1
+		MOV	#2,R2
+		CALL	PRINT_STR
+		RETURN
+
+MENUC:		.WORD	0
+
+MENU_SHOWCH:	MOV	#CH_ROW,R0
+		MOV	#CH_COL,R1
+		MOV	#3,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#CH_ROW,R0
+		MOV	#CH_COL,R1
+		MOV	#3,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
 		RETURN

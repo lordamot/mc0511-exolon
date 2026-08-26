@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import resources as R
 import zone_render as Z
 import exolon_re as E
+import rt11_home as HOME
 
 ROOT = Path(__file__).resolve().parent.parent
 PROG_SIZE = 0o110000
@@ -111,9 +112,9 @@ def smoke(dsk, out_png):
 press 030
 run 30
 press 153
-run 320
+run 500
 screenshot {out_png.with_suffix('.title.bmp')}
-press 153 5
+press {K_ONE:o} 3
 run 120
 screenshot {out_png}
 dumpcpu 0140000 3072 {out_png.with_suffix('.cells.bin')}
@@ -158,21 +159,28 @@ def sym(name):
 
 O_SIZE, O_OBJ, O_COL, O_ROW, O_T = 8, 6, 4, 5, 7
 E_SIZE, E_STATE, E_X, E_Y, E_KIND, E_T1, E_T2 = 6, 0, 1, 2, 3, 4, 5
-EK_GREN, EK_SPARK, EK_BALL, EK_ROCK, EK_TPFX, EK_MINE = 3, 6, 7, 8, 9, 10
+EK_GREN, EK_SPARK, EK_BALL, EK_ROCK, EK_TPFX, EK_MINE, EK_EMIT = (
+    3, 6, 7, 8, 9, 10, 11)
 NENT = 48
+EK_ROCK_FRAME = 36        # the hunting rocket's 16x16 frame
 C_SIZE, C_ROW = 4, 128
 GUN_TILE = 191
 BUF = 0o110000
 
-BOOT = """run 900
+# The firmware boot menu wants "1" then ENTER; the game's own title
+# screen is started with "1" as well (K_ONE), and "2" toggles infinite
+# lives.
+K_RIGHT, K_DOWN, K_UP, K_FIRE, K_GREN = 133, 134, 154, 107, 166
+K_ONE, K_TWO, K_PAUSE = 0o30, 0o31, 0o6
+
+BOOT = f"""run 900
 press 030
 run 30
 press 153
-run 320
-press 153 5
+run 500
+press {K_ONE:o} 3
+run 40
 """
-
-K_RIGHT, K_DOWN, K_UP, K_FIRE, K_GREN = 133, 134, 154, 107, 166
 
 
 def ents(blob):
@@ -216,7 +224,11 @@ def mirror(v, width):
 def emu(body, tmpdir):
     """Run a script after the boot preamble; -> {address: value} for
     every peekcpu, in order, plus the files any dumpcpu wrote."""
-    script = BOOT + body + "quit\n"
+    return emu_raw(BOOT + body, tmpdir)
+
+
+def emu_raw(script, tmpdir):
+    script = script + "quit\n"
     sp = Path(tmpdir) / "s.script"
     sp.write_text(script)
     r = subprocess.run([str(ROOT / "bin/ukncbtl/uknc-headless"),
@@ -511,6 +523,19 @@ def gameplay_new(td, v):
               m0[0][1] > 110 and m1[0][1] < m0[0][1] + 8,
               f"x {m0[0][1]} -> {m1[0][1]}, y {m0[0][2]} -> {m1[0][2]}")
 
+    # --- the wall emitters (the pair of guns on a wall) -----------
+    A_NEMIT = sym("NEMIT")
+    em = td / "emit.bin"
+    ev = emu(f"run 10\n{poke16(A_ZONE, 6)}{poke16(A_ZONELOAD, 1)}run 40\n"
+             f"peekcpu {A_NEMIT:o}\n{poke16(A_PX, 8)}run 200\n"
+             f"dumpcpu {A_ENTS:o} {ENTBYTES} {em}\n", td)
+    check("zone 6's wall guns are both found", ev[0] == 2,
+          f"{ev[0]} emitters")
+    ee = [x for x in ents(em.read_bytes()) if x[0] == EK_EMIT]
+    check("and they spit along their own row",
+          len(ee) >= 1 and all(x[3] == 0xFE for x in ee),
+          f"{len(ee)} shots in the air")
+
     # --- the rocket that comes for a lingering player -------------
     ro = td / "rock.bin"
     rv = emu(f"run 10\npeekcpu {A_ROCKACT:o}\n"
@@ -527,6 +552,82 @@ def gameplay_new(td, v):
         check("it crosses from the right at the player's height",
               rx <= 120 and rx >= 112 and step == 0xFE,
               f"x {rx} y {ry} step {step - 256}")
+
+    # It is drawn from a frame that faces right, so flying left it has
+    # to be mirrored - the original just drew it backwards.
+    # It is drawn from a frame that faces right, so flying left it has
+    # to be mirrored - the original just drew it backwards.  Send it
+    # across empty sky, pause (which freezes the back buffer, so the
+    # dump cannot catch it half drawn) and compare it with the frame.
+    W = 32
+    bgf, entf, buff = td / "rbg.bin", td / "rme.bin", td / "rmb.bin"
+    emu(f"run 10\n{poke16(A_PX, 8)}{poke16(A_PY, 40)}"
+        f"dumpcpu {BUF:o} 12288 {bgf}\n"
+        f"{poke16(A_FRAMECNT, 700)}run 6\n"
+        f"press {K_PAUSE:o}\nrun 10\n"
+        f"dumpcpu {A_ENTS:o} {ENTBYTES} {entf}\n"
+        f"dumpcpu {BUF:o} 12288 {buff}\n", td)
+    frame = R.read_frames(ROOT / "src/res/sprites/small.txt", 2)[EK_ROCK_FRAME]
+    rk2 = [x for x in ents(entf.read_bytes()) if x[0] == EK_ROCK]
+    check("the rocket crosses the sky as well", len(rk2) == 1,
+          f"{len(rk2)} rockets")
+    if rk2:
+        _, rx, ry, _, _ = rk2[0]
+        shift = (rx & 3) * 2
+        bgb = sprite_bits(bgf.read_bytes(), ry, rx // 4, 4, 16)
+        fgb = sprite_bits(buff.read_bytes(), ry, rx // 4, 4, 16)
+        drawn = [f & ~g for f, g in zip(fgb, bgb)]
+
+        def expect(mirrored):
+            out = []
+            for y in range(16):
+                e = 0
+                for px_ in range(16):
+                    # the sheet keeps bit 7 as the leftmost pixel
+                    if frame[y * 2 + px_ // 8] & (0x80 >> (px_ % 8)):
+                        k = (15 - px_) if mirrored else px_
+                        e |= 1 << (W - 1 - (shift + k))
+                out.append(e)
+            return out
+
+        miss = lambda exp: sum(bin(e & ~d).count("1")
+                               for d, e in zip(drawn, exp))
+        m, pl = miss(expect(True)), miss(expect(False))
+        check("and it is drawn nose first, not tail first",
+              m == 0 and pl > 0,
+              f"{m} pixels of the mirrored frame are missing, {pl} of the "
+              f"plain one")
+
+
+def menu(tmpdir):
+    """The title screen: "1" starts, "2" turns infinite lives on and it
+    holds through a death."""
+    td = Path(tmpdir)
+    A_LIVES, A_CHEAT, A_ZONE = sym("LIVES"), sym("CHEAT"), sym("ZONE")
+    A_PDEAD = sym("PDEAD")
+    title = ("run 900\npress 030\nrun 30\npress 153\nrun 500\n")
+
+    # "1" alone gets into a game
+    st = emu_raw(title + f"press {K_ONE:o}\nrun 60\n"
+                 f"peekcpu {A_LIVES:o}\npeekcpu {A_CHEAT:o}\n", td)
+    check("the title screen starts on 1", st[0] == 7 and st[1] == 0,
+          f"lives {st[0]}, cheat {st[1]}")
+
+    # "2" arms the option and it survives into the game
+    ch = emu_raw(title + f"press {K_TWO:o}\nrun 20\n"
+                 f"press {K_ONE:o}\nrun 60\n"
+                 f"peekcpu {A_CHEAT:o}\n"
+                 # sit in front of the first zone's turret until it kills
+                 # him a few times over
+                 f"run 900\n"
+                 f"peekcpu {A_LIVES:o}\npeekcpu {A_PDEAD:o}\n", td)
+    check("2 turns infinite lives on", ch[0] == 1, f"cheat {ch[0]}")
+    check("and dying then costs nothing", ch[1] == 7, f"lives {ch[1]}")
+
+    # without it, the same wait costs lives
+    no = emu_raw(title + f"press {K_ONE:o}\nrun 60\nrun 900\n"
+                 f"peekcpu {A_LIVES:o}\n", td)
+    check("while without it they run out", no[0] < 7, f"lives {no[0]}")
 
 
 def white_rows():
@@ -599,6 +700,16 @@ def main():
         # the firmware only boots a disk whose first word is a NOP
         check("boot sector marker", data[0] == 0o240 and data[1] == 0,
               f"first word {data[0] | (data[1] << 8):06o}")
+        vol = HOME.read_volume(data[512:1024])
+        check("the disk carries its name", vol == "EXOLON",
+              f"volume id {vol!r}")
+        # the program's tail has to start where the loader looks for it
+        raw = ROOT / "build/exolon.raw"
+        if raw.exists():
+            tail = raw.read_bytes()[512:1024]
+            ok = data[1024:1536] == tail
+            check("and the program follows the home block", ok,
+                  "" if ok else "LBA 2 is not the program's second sector")
         raw = ROOT / "build/exolon.raw"
         if raw.exists():
             check("program fits its budget",
@@ -618,6 +729,14 @@ def main():
             check("zone 0 collision map is loaded", ground)
             hud = any(cells[22 * 128 + c * 4] != 0 for c in range(32))
             check("HUD row is drawn", hud)
+
+    print("menu")
+    if dsk.exists():
+        with tempfile.TemporaryDirectory() as td:
+            try:
+                menu(td)
+            except RuntimeError as e:
+                check("the title screen runs", False, str(e))
 
     print("gameplay")
     if dsk.exists():

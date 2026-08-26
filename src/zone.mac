@@ -21,6 +21,7 @@ ZONE_LOAD:	CLR	ZONELOAD
 		CLR	NTPORT
 		CLR	NSUITP
 		CLR	NMINE
+		CLR	NEMIT
 		CALL	ENTS_CLEAR	; also disarms the zone's rocket
 		MOV	ZONE,R0
 		ASL	R0
@@ -192,7 +193,17 @@ SPEC_SCAN:	CLR	R1			; how many force fields first,
 		MOV	R3,SUITCOL(R2)
 		INC	NSUITP
 		BR	5$
-9$:		CMP	R0,#CL_MINE	; a mine, which throws missiles in
+9$:		CMP	R0,#CL_EMIT	; a wall emitter, which spits along
+		BNE	10$		; its own row at an approaching player
+		CMP	NEMIT,#EMITMAX
+		BHIS	5$
+		MOV	NEMIT,R2
+		ASL	R2
+		MOV	R4,EMITROW(R2)
+		MOV	R3,EMITCOL(R2)
+		INC	NEMIT
+		BR	5$
+10$:		CMP	R0,#CL_MINE	; a mine, which throws missiles in
 		BNE	4$		; from the right until it is shot out
 		TST	NMINE
 		BNE	5$

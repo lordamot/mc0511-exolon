@@ -2,9 +2,10 @@
 """dsk_build.py - build a raw UKNC bootable .dsk image from a manifest.
 
 The game disk has no file system: the boot sector (LBA 0) is the first
-sector of the main program, and everything else is addressed by absolute
-LBA sector numbers hard-coded in the loader's parameter blocks (see
-src/boot/boot.mac).  The disk is a plain sector-by-sector image:
+sector of the main program, LBA 1 is an RT-11 home block that carries
+nothing but the disk's name, and everything else is addressed by
+absolute LBA sector numbers hard-coded in the loader's parameter blocks
+(see src/boot.mac).  The disk is a plain sector-by-sector image:
 80 tracks x 2 sides x 10 sectors x 512 bytes = 819200 bytes.
 
 Manifest (JSON):

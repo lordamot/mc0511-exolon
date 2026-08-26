@@ -2,8 +2,9 @@
 ; Boot sector + FDD loader.  Adapted from ../mc0511-openit (same
 ; firmware conventions): the firmware loads sector 0 (this file's
 ; first 512 bytes) and jumps to 0; we bootstrap a small PPU stub,
-; then pull the rest of the program (LOAD_LEN sectors from LBA 1)
-; through the channel K2 FDD service, drawing a progress bar.
+; then pull the rest of the program (LOAD_LEN sectors from LBA 2 -
+; LBA 1 is the RT-11 home block that gives the disk its name) through
+; the channel K2 FDD service, drawing a progress bar.
 ; ------------------------------------------------------------------
 		. = 0
 	        NOP				; bootable disk marker
@@ -80,7 +81,7 @@ K2_CPU_ADDR:	.WORD	0		; load address in CPU memory
 K2_LOAD_WORDS:	.WORD	0		; load size in words
 K2_FDD_PARAMS:	.WORD	K2_ERR_CODE,-1
 LOAD_LEN = <PROG_END-LOOP>/2/256.
-PARAMS_MAINDATA:.WORD	1000,LOAD_LEN,1
+PARAMS_MAINDATA:.WORD	1000,LOAD_LEN,2	; LBA 1 is the home block
 
 ; 50 Hz interrupt during load: animated progress bar
 INTERR:		MOV	R0,-(SP)

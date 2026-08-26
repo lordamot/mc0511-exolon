@@ -88,6 +88,7 @@ CL_TPORT = 6.		; teleport pad     (press up)
 CL_AMMO	= 7.		; ammunition canister (walk into)
 CL_GREN	= 8.		; grenade canister    (walk into)
 CL_FIELD = 9.		; force-field beam
+CL_EMIT	= 11.		; wall emitter: spits along its own row
 CL_SUIT	= 12.		; power-suit booth (press up)
 CL_MINE	= 13.		; mine
 NSPEC	= 2		; teleport pads / suit booths kept per zone
@@ -121,6 +122,15 @@ ROCK_SMOKE = 111.	; it only trails smoke once it is this far in
 ; the UKNC each one costs about a tenth of a frame to move.
 BALLS	= 6.
 BALL_TURN = 220.	; a random byte at or above this reverses one
+
+; Wall emitters (the original's class 11, list 0x9DC1, fired at
+; 0x9D7F): they spit a bolt down their own row, leftwards, when a
+; random byte comes up at or above EMIT_FIRE and the player is at least
+; EMIT_NEAR units to the left of them.  No zone has more than four.
+EMITMAX	= 4
+EMIT_FIRE = 247.
+EMIT_NEAR = 30.
+EMIT_STEP = -2
 
 ; A mine keeps throwing homing missiles in from the right until it is
 ; shot out (0xA23A / 0xA26B): one at a time, entering at a random
