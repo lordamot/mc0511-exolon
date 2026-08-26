@@ -4,19 +4,19 @@
     is declared by hand).  This is `make run`: boot the game disk and play.
 
     Usage:
-        uknc-play --rom uknc_rom.bin --disk build/openit.dsk [--no-autoboot]
+        uknc-play --rom uknc_rom.bin --disk build/exolon.dsk [--no-autoboot]
 
     By default the firmware loader menu is driven automatically
-    ("1 - диск" + ВВОД), landing straight in the game menu.
+    ("1 - диск" + ВВОД), landing straight on the title screen.
 
     Keys:
-        arrows           cursor / menu navigation
-        Space or LCtrl   ФИКС      (player 1: open the cell / stop the roulette)
-        KP Enter, RCtrl  доп. ВВОД (player 2: open / stop)
+        arrows           move / jump / crouch
+        Space or LCtrl   ФИКС      (fire)
+        KP Enter, RCtrl  доп. ВВОД (throw a grenade)
         Enter            ВВОД      (menu select)
-        Tab              АР2       (in-game pause menu)
-        Esc              СТОП      (in-game pause menu)
-        1..0             UKNC digit row
+        Tab              АР2       (pause)
+        Esc              СТОП
+        1..0             UKNC digit row ("1" starts a game)
         close window     quit the emulator
 */
 
@@ -27,6 +27,16 @@
 #include <vector>
 
 static CMotherboard *g_pBoard = nullptr;
+
+// --- speaker output -------------------------------------------------
+// emubase calls this 882 times per SystemFrame (SAMPLERATE 22050 / 25);
+// the samples collect here and the main loop queues them on the SDL
+// audio device once a frame.
+static std::vector<int16_t> g_audioBuf;
+static void CALLBACK AudioCallback(unsigned short L, unsigned short /*R*/)
+{
+    g_audioBuf.push_back((int16_t)((int)L - 16384));
+}
 
 // YRGB -> RGB32 palette (ScreenView_StandardRGBColors from UKNCBTL).
 static const uint32_t g_colors[16 * 8] =
@@ -240,7 +250,29 @@ int main(int argc, char *argv[])
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_Window *win = SDL_CreateWindow("Bruce Lee  \xd0\xa3\xd0\x9a\xd0\x9d\xd0\xa6 \xd0\x9c\xd0\xa1-0511",
+
+    // the beeper: 22050 Hz mono S16, pushed with SDL_QueueAudio; if the
+    // host has no usable audio the game still runs, just silent
+    uint32_t audioDev = 0;
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0)
+    {
+        SDL_AudioSpec want;
+        memset(&want, 0, sizeof(want));
+        want.freq = 22050;
+        want.format = AUDIO_S16LSB;
+        want.channels = 1;
+        want.samples = 1024;
+        audioDev = SDL_OpenAudioDevice(nullptr, 0, &want, nullptr, 0);
+        if (audioDev)
+        {
+            g_pBoard->SetSoundGenCallback(AudioCallback);
+            SDL_PauseAudioDevice(audioDev, 0);
+        }
+    }
+    if (!audioDev)
+        fprintf(stderr, "no audio device, running silent: %s\n",
+                SDL_GetError());
+    SDL_Window *win = SDL_CreateWindow("Exolon  \xd0\xa3\xd0\x9a\xd0\x9d\xd0\xa6 \xd0\x9c\xd0\xa1-0511",
                                        (int)SDL_WINDOWPOS_CENTERED,
                                        (int)SDL_WINDOWPOS_CENTERED,
                                        1280, 960, SDL_WINDOW_RESIZABLE);
@@ -301,6 +333,16 @@ int main(int argc, char *argv[])
         g_pBoard->SystemFrame();   // 1/25 s of emulated time
         frame++;
 
+        if (audioDev)
+        {
+            // keep at most ~4 frames (160 ms) queued so audio latency
+            // cannot build up when a frame overruns its 40 ms slot
+            if (SDL_GetQueuedAudioSize(audioDev) < 4 * 882 * 2)
+                SDL_QueueAudio(audioDev, g_audioBuf.data(),
+                               (uint32_t)(g_audioBuf.size() * 2));
+            g_audioBuf.clear();
+        }
+
         PrepareScreenRGB32(bits.data(), g_colors);
         SDL_UpdateTexture(tex, nullptr, bits.data(), 640 * 4);
         SDL_RenderClear(ren);
@@ -315,6 +357,8 @@ int main(int argc, char *argv[])
             next = now;
     }
 
+    if (audioDev)
+        SDL_CloseAudioDevice(audioDev);
     SDL_Quit();
     delete g_pBoard;
     return 0;

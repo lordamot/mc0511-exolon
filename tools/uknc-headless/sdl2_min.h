@@ -16,6 +16,7 @@ typedef struct SDL_Window SDL_Window;
 typedef struct SDL_Renderer SDL_Renderer;
 typedef struct SDL_Texture SDL_Texture;
 
+#define SDL_INIT_AUDIO          0x00000010u
 #define SDL_INIT_VIDEO          0x00000020u
 #define SDL_WINDOWPOS_CENTERED  0x2FFF0000u
 #define SDL_WINDOW_RESIZABLE    0x00000020u
@@ -71,5 +72,29 @@ void SDL_RenderPresent(SDL_Renderer *);
 int SDL_PollEvent(SDL_Event *);
 uint32_t SDL_GetTicks(void);
 void SDL_Delay(uint32_t ms);
+
+/* -- audio (the push interface: SDL_QueueAudio, no callback) -- */
+#define AUDIO_S16LSB 0x8010
+
+typedef struct {
+    int freq;
+    uint16_t format;
+    uint8_t channels;
+    uint8_t silence;
+    uint16_t samples;
+    uint16_t padding;
+    uint32_t size;
+    void (*callback)(void *, uint8_t *, int);
+    void *userdata;
+} SDL_AudioSpec;
+
+int SDL_InitSubSystem(uint32_t flags);
+uint32_t SDL_OpenAudioDevice(const char *device, int iscapture,
+                             const SDL_AudioSpec *desired,
+                             SDL_AudioSpec *obtained, int allowed_changes);
+void SDL_PauseAudioDevice(uint32_t dev, int pause_on);
+int SDL_QueueAudio(uint32_t dev, const void *data, uint32_t len);
+uint32_t SDL_GetQueuedAudioSize(uint32_t dev);
+void SDL_CloseAudioDevice(uint32_t dev);
 
 } /* extern "C" */
