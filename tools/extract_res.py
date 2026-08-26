@@ -257,9 +257,12 @@ SMALL_BANK_FRAMES = {           # sheet frame -> bank frame
     52: 8,                      # a wall emitter's shot
 }
 
+# The power suit's own bolt: the original has no sprite for the player's
+# fire at all (it drew a bare pattern), and the port needs a visibly
+# heavier one for the two-gun shot the suit gives him.  It sits in the
+# frame's top rows so the entity's y is the top of the bar.
 EXTRA_SMALL = {
-    45: ["." * 16] * 7 + ["..############..", "..############.."]
-        + ["." * 16] * 7,
+    45: [".###########....", ".###########...."] + ["." * 16] * 14,
 }
 
 
@@ -335,7 +338,7 @@ def main():
         RES / "sprites/small.txt": lambda p: write_sprites(
             mem, p, SMALL_ORG, SMALL_FRAMES, SMALL_W, SMALL_H,
             "16x16 sprites (0..9 explosion, 10..15 rockets and missiles, "
-            "16..19 energy balls, 36 the rocket that hunts a player who\n; lingers, 45 the player's bolt, 46/47 a grenade, 48 an energy ball,\n; 49..51 sparks, 52 a wall emitter's shot)",
+            "16..19 energy balls, 36 the rocket that hunts a player who\n; lingers, 45 the power suit's bolt, 46/47 a grenade, 48 an energy ball,\n; 49..51 sparks, 52 a wall emitter's shot)",
             small_extra(mem)),
         RES / "text/strings.txt": lambda p: p.write_text(STRINGS),
     }

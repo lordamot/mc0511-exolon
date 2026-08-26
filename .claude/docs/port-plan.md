@@ -152,16 +152,37 @@ player, `make shot` / `make demo` drive the headless emulator, and
    energy balls, mine missiles, the lingering-player rocket [DONE]
 10. the wall emitters, the menu's two options, right-facing frames
     mirrored when they fly left, and the disk's name [DONE]
+11. the double gun's two streams as separate targets, the power suit's
+    twin guns, harmless explosions, and a generator worth the name
+    [DONE]
 
 ## Notes from the implementation
 
-- **Three things face the wrong way in the original, and only one of
-  them is a bug.**  The player sheet has a single facing and the ZX
-  plotter cannot mirror, so Vitorc walks left backwards; the missiles
-  and the hunting rocket are drawn from right-facing frames and only
-  ever fly left.  The port mirrors all of them, through one 256-byte
-  bit-reversal table: `SPRMIR` turns the player round, and `KINDMIR` in
-  `shots.mac` turns an entity round whenever its x step is negative.
+- **Two things face the wrong way in the original.**  The player sheet
+  has a single facing and the ZX plotter cannot mirror, so Vitorc walks
+  left backwards; and the rocket that hunts a lingering player is drawn
+  from a right-facing frame although it only ever flies left.  The
+  missiles, on the other hand, face left already.  The port turns both
+  of the wrong ones round through one 256-byte bit-reversal table:
+  `SPRMIR` for the player, and `KINDMIR` in `shots.mac`, which records
+  which way each kind's art faces and mirrors it when that disagrees
+  with the direction it is travelling.
+
+- **The generator matters more than the numbers it produces.**  Almost
+  every timer in the original is "fire when a random byte clears a
+  threshold", sampled once a frame per object, so what it needs is
+  independence between consecutive calls.  A 16-bit LFSR stepped once
+  per call does not have it - its bytes drift - and the wall guns fired
+  in bursts that read as one long bullet.  `RANDOM` is a 16-bit LCG
+  returning the high byte, which mixes the whole word every call.
+
+- **A wall gun's two barrels are two targets.**  The bolt-against-shot
+  test uses both boxes and gives slack only horizontally, where a bolt
+  and its target can pass through each other inside a frame.  With none
+  vertically, a standing shot reaches only the upper stream of a double
+  gun and a crouched one only the lower - and the power suit becomes
+  worth having, because it fires a heavier bolt from two barrels eight
+  pixels apart and cuts down both at once.
 
 - **Vitorc turns round, and the original's Vitorc does not.**  The ZX
   sheet has one facing and the plotter at 0x76DA has no mirror path, so

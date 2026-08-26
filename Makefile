@@ -21,10 +21,10 @@ shot: build
 	python3 tools/uknc_control.py boot --disk $(GAME_DSK) --wait 400 \
 	    --shot tmp/run-title.png
 
-# start a game and walk into zone 0, screenshot it
+# start a game (the title screen starts on "1") and screenshot zone 0
 demo: build
-	python3 tools/uknc_control.py play --disk $(GAME_DSK) ENTER \
-	    --every 60 --wait 200 --shot tmp/run-demo.png
+	python3 tools/uknc_control.py play --disk $(GAME_DSK) 1 \
+	    --every 60 --wait 260 --shot tmp/run-demo.png
 
 # resource round-trips, generator determinism, and a boot-to-gameplay
 # smoke test in the headless emulator

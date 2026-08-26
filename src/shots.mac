@@ -23,7 +23,8 @@ EK_ROCK	= 8.		; the rocket that hunts a lingerer (0xAC7D)
 EK_TPFX	= 9.		; a teleport pad's spark emitter (0x9EEE)
 EK_MINE	= 10.		; a mine's homing missile (0xA26B)
 EK_EMIT	= 11.		; a wall emitter's bolt (0x9D7F / 0x9DD6)
-NKIND	= 12.
+EK_BOLT2 = 12.		; the power suit's bolt: heavier, and two at once
+NKIND	= 13.
 
 SPR_GRENR = 46.		; the grenade in flight, facing right and left
 SPR_GRENL = 47.
@@ -33,6 +34,7 @@ SPR_ROCK = 36.		; the rocket that hunts a lingering player
 SPR_MINE = 10.		; a mine's missile, closing and then bearing down
 SPR_MINE2 = 11.
 SPR_EMIT = 52.		; a wall emitter's bolt
+SPR_BOLT2 = 45.		; the power suit's bolt
 
 ; The 16x16 bank holds two halves of an explosion: 12..15 is the flash
 ; opening up and 5..9 the sparks thinning out (frame 0 is blank - the
@@ -82,21 +84,25 @@ GRENMAXX = 118.		; it cannot be thrown any closer to the right edge
 ; KINDRW/H the cell rectangle the kind covers, for erase and blit
 ; KINDW/H  its collision box, x units and pixels - the numbers the
 ;          original passes to 0x9BD6 in BC
-KINDPIX:	.BYTE	0,1,1,0,0,0,0,0,0,1,0,0
-KINDRW:		.BYTE	1,1,1,3,4,4,2,2,4,1,4,2
-KINDRH:		.BYTE	1,1,1,2,3,3,2,2,3,1,3,2
-KINDW:		.BYTE	1,1,1,8.,8.,8.,1,4.,16.,1,16.,4.
-KINDH:		.BYTE	1,1,1,8.,16.,16.,1,8.,8.,1,8.,8.
+KINDPIX:	.BYTE	0,1,1,0,0,0,0,0,0,1,0,0,0
+KINDRW:		.BYTE	1,1,1,3,4,4,2,2,4,1,4,2,3
+KINDRH:		.BYTE	1,1,1,2,3,3,2,2,3,1,3,2,2
+KINDW:		.BYTE	1,1,1,8.,8.,8.,1,4.,16.,1,16.,4.,6.
+KINDH:		.BYTE	1,1,1,8.,16.,16.,1,8.,8.,1,8.,8.,2
 ; how much of a 16x16 frame actually holds anything: lines, and cells
 ; across (an eight-pixel frame spans two cells at any sub-cell shift)
-KINDSH:		.BYTE	8.,8.,8.,8.,16.,16.,8.,8.,16.,8.,16.,8.
-KINDSW:		.BYTE	2,2,2,2,4,4,2,2,4,2,4,2
-; The missiles and the hunting rocket are drawn from frames that face
-; right - the original reused them for things that only ever fly left,
-; and drew them backwards.  This port turns them round instead, the way
-; it turns the player round, so a kind marked here is mirrored whenever
-; its x step is negative.
-KINDMIR:	.BYTE	0,0,0,0,0,1,0,0,1,0,1,0
+KINDSH:		.BYTE	8.,8.,8.,8.,16.,16.,8.,8.,16.,8.,16.,8.,2
+KINDSW:		.BYTE	2,2,2,2,4,4,2,2,4,2,4,2,3
+; Which way a kind's frame faces: 0 = it does not matter, 1 = the art
+; faces right, 2 = it faces left.  The original is not consistent about
+; this - the missiles (frames 10 and 11) are drawn facing left and the
+; rocket that hunts a lingering player (36) facing right, and all three
+; only ever fly left, so it drew the rocket backwards.  The port turns
+; a frame round when its kind's facing disagrees with its x step, the
+; same way it turns the player round.
+MIR_R	= 1
+MIR_L	= 2
+KINDMIR:	.BYTE	0,0,0,0,0,MIR_L,0,0,MIR_R,0,MIR_L,0,0
 		.EVEN
 
 EN_TAB:		.WORD	EN_KILL		; 0: never happens
@@ -111,6 +117,7 @@ EN_TAB:		.WORD	EN_KILL		; 0: never happens
 		.WORD	EN_TPFX
 		.WORD	EN_MINE
 		.WORD	EN_EMIT
+		.WORD	EN_BOLT		; the suit's bolt flies like any other
 
 ENTS_CLEAR:	MOV	#ENTS,R0
 		MOV	#E.SIZE*NENT,R1
@@ -185,8 +192,24 @@ SHOOT_BOLT:	TST	PDEAD
 		BR	3$
 2$:		ADD	#12.,R1
 3$:		MOV	#EK_BOLT,R0
+		TST	PSUIT		; the suit fires the heavy pair
+		BEQ	4$
+		MOV	#EK_BOLT2,R0
+		MOV	R1,BOLTX
+		MOV	R2,BOLTY
+		MOV	R4,BOLTS
 		CALL	ENT_SPAWN
+		MOV	BOLTX,R1
+		MOV	BOLTY,R2
+		ADD	#SUIT_GAP,R2
+		MOV	BOLTS,R4
+		MOV	#EK_BOLT2,R0
+4$:		CALL	ENT_SPAWN
 9$:		RETURN
+
+BOLTX:		.WORD	0
+BOLTY:		.WORD	0
+BOLTS:		.WORD	0
 
 ; ------------------------------------------------------------------
 ; The player throws a grenade (0x9208).  Only one is ever in the air,
@@ -288,7 +311,11 @@ EN_BOLT:	CALL	ENT_STEPX
 		CMPB	E.T2(R5),#40.
 		BLO	92$
 		JMP	EN_KILL
-92$:		JMP	ENT_SHOWPIX
+92$:		CALL	ENT_ISPIX	; the suit's bolt is a sprite, the
+		BNE	93$		; pistol's a single pixel (ENT_ISPIX
+		MOV	#SPR_BOLT2,R0	; keeps R5, and nothing may touch the
+		JMP	ENT_SHOW	; flags between the two)
+93$:		JMP	ENT_SHOWPIX
 
 ; ---- enemy shot / missile ----------------------------------------
 EN_SHOT:	CALL	ENT_STEPX
@@ -413,6 +440,8 @@ GREN_TRAIL:	MOVB	E.T2(R5),R0
 		RETURN
 
 ; ---- explosion ---------------------------------------------------
+; An explosion is scenery, not a hazard: the original's (0x9FBD) never
+; tests the player, so blowing something up next to yourself is safe.
 EN_BOOM:	INCB	E.T2(R5)
 		MOVB	E.T2(R5),R0
 		BIC	#177400,R0
@@ -420,12 +449,7 @@ EN_BOOM:	INCB	E.T2(R5)
 		CMP	R0,#BOOMLEN
 		BLO	98$
 		JMP	EN_KILL
-98$:		MOV	R0,-(SP)
-		CALL	ENT_HITPLAYER
-		BEQ	1$
-		CALL	PLAYER_KILL
-1$:		MOV	(SP)+,R0
-		MOVB	BOOMSEQ(R0),R0
+98$:		MOVB	BOOMSEQ(R0),R0
 		BIC	#177400,R0
 		MOV	ECUR,R5
 		JMP	ENT_SHOW
@@ -771,10 +795,16 @@ EMITI:		.WORD	0
 
 EMIT_CHECK:	TST	NEMIT
 		BEQ	9$
-		TST	PDEAD
-		BNE	9$
 		CLR	EMITI
-1$:		CALL	RANDOM
+1$:		MOV	EMITI,R0
+		ASL	R0
+		TST	EMITT(R0)
+		BEQ	2$
+		DEC	EMITT(R0)
+		BR	5$
+2$:		TST	PDEAD
+		BNE	5$
+		CALL	RANDOM
 		CMP	R0,#EMIT_FIRE
 		BLO	5$
 		MOV	EMITI,R0
@@ -798,7 +828,11 @@ EMIT_CHECK:	TST	NEMIT
 		MOV	#EMIT_STEP,R4
 		MOV	#EK_EMIT,R0
 		CALL	ENT_SPAWN
+		BEQ	5$
 		MOV	#SFX_SHOT,SND_REQ
+		MOV	EMITI,R0
+		ASL	R0
+		MOV	#EMIT_WAIT,EMITT(R0)
 5$:		INC	EMITI
 		CMP	EMITI,NEMIT
 		BLO	1$
@@ -936,16 +970,26 @@ ENT_WIPE:	MOV	R3,-(SP)
 ; down is the one thing the original's bolt really does (0x83DD tests
 ; the sprite map, not the scenery), and the same test at 0x9B52 pops a
 ; force field's energy balls, so the kinds are listed together here.
-; The bolt is a single pixel and its targets move several pixels a
-; frame, so the margins are generous.
+;
+; Both boxes are the kinds' own.  Horizontally the bolt gets some slack,
+; because it and its target can pass through each other inside a frame;
+; vertically it gets none, and that is what makes a wall gun's two
+; barrels two separate targets - a standing shot can only reach the
+; upper stream and a crouched one only the lower, and it takes the power
+; suit's pair of guns to cut down both at once.
 BVS_MX	= 3		; margin, x units
-BVS_MY	= 5		; margin, pixels
 BVSN:		.WORD	0
 BVSOBJ:		.WORD	0
 BVSW:		.WORD	0
 BVSH:		.WORD	0
+BVSMW:		.WORD	0
+BVSMH:		.WORD	0
 
-BOLT_VS_SHOT:	MOV	#ENTS,R3
+BOLT_VS_SHOT:	MOV	ECUR,R5		; the bolt's own box
+		CALL	ENT_BOX
+		MOV	R2,BVSMW
+		MOV	R3,BVSMH
+		MOV	#ENTS,R3
 		MOV	#NENT,BVSN
 1$:		TSTB	E.STATE(R3)
 		BEQ	3$
@@ -959,33 +1003,39 @@ BOLT_VS_SHOT:	MOV	#ENTS,R3
 		BEQ	2$
 		CMP	R0,#EK_EMIT
 		BNE	3$
-2$:		MOV	R3,BVSOBJ	; measure against the target's own box
+2$:		MOV	R3,BVSOBJ	; and the target's
 		MOV	R3,R5
 		CALL	ENT_BOX
 		MOV	R2,BVSW
 		MOV	R3,BVSH
 		MOV	BVSOBJ,R3
 		MOV	ECUR,R5
-		MOVB	E.X(R5),R1	; the bolt is a single point
+		MOVB	E.X(R5),R1	; x: [t.x - bolt.w - m, t.x + t.w + m)
 		BIC	#177400,R1
 		MOVB	E.X(R3),R0
 		BIC	#177400,R0
-		SUB	#BVS_MX,R0
+		SUB	BVSMW,R0
+		SUB	#BVS_MX-1,R0
 		CMP	R1,R0
 		BLT	3$
+		MOVB	E.X(R3),R0
+		BIC	#177400,R0
 		ADD	BVSW,R0
-		ADD	#BVS_MX+BVS_MX,R0
+		ADD	#BVS_MX-1,R0
 		CMP	R1,R0
 		BGT	3$
-		MOVB	E.Y(R5),R1
+		MOVB	E.Y(R5),R1	; y: exactly the two boxes overlapping
 		BIC	#177400,R1
 		MOVB	E.Y(R3),R0
 		BIC	#177400,R0
-		SUB	#BVS_MY,R0
+		SUB	BVSMH,R0
+		INC	R0
 		CMP	R1,R0
 		BLT	3$
+		MOVB	E.Y(R3),R0
+		BIC	#177400,R0
 		ADD	BVSH,R0
-		ADD	#BVS_MY+BVS_MY,R0
+		DEC	R0
 		CMP	R1,R0
 		BGT	3$
 		CALL	ENT_WIPE	; it may already be on screen
@@ -1012,10 +1062,16 @@ ENT_SHOW:	MOV	R0,-(SP)
 		MOV	R2,SPRC
 		CLR	SPRMIR
 		MOVB	KINDMIR(R4),R2
+		BIC	#177400,R2
 		BEQ	1$
-		TSTB	E.T1(R5)	; a right-facing frame flying left
-		BGE	1$
-		MOV	#1,SPRMIR
+		TSTB	E.T1(R5)
+		BLT	2$
+		CMP	R2,#MIR_L	; going right: a left-facing frame
+		BNE	1$		; is the one to turn round
+		BR	3$
+2$:		CMP	R2,#MIR_R	; going left: a right-facing one
+		BNE	1$
+3$:		MOV	#1,SPRMIR
 1$:		MOV	(SP)+,R0
 		MOVB	E.X(R5),R1
 		BIC	#177400,R1

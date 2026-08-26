@@ -131,6 +131,9 @@ EMITMAX	= 4
 EMIT_FIRE = 247.
 EMIT_NEAR = 30.
 EMIT_STEP = -2
+EMIT_WAIT = 40.		; and never twice inside this many frames, so the
+			; two barrels of a double gun send single shots
+			; rather than an unbroken line of them
 
 ; A mine keeps throwing homing missiles in from the right until it is
 ; shot out (0xA23A / 0xA26B): one at a time, entering at a random
@@ -144,6 +147,12 @@ MINE_FAST = 70.
 ; The teleport's spark shower (0x9ED9) and one spark's life (0x981D).
 TPFX_LEN = 20.
 SPARK_LEN = 10.
+
+; The power suit is two guns, not one: it fires a heavier bolt from the
+; standing muzzle and a second SUIT_GAP pixels below it, which is the
+; gap between the two barrels of a wall gun - so a suited player can cut
+; down both of its streams at once.
+SUIT_GAP = 8.
 
 ; ---- sound requests (SND_REQ) ------------------------------------
 SFX_SHOT = 1

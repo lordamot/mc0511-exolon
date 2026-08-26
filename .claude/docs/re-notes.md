@@ -229,10 +229,10 @@ count out to sixteen with the blank, so the frame takes the same time
 however much is on screen; 0x9EAE/0x9E99 do the same for the 16x16
 plotter, to six.
 
-**Some frames are drawn backwards.**  The missiles (10, 11) and the
-rocket that hunts a lingering player (36) all face right, and every one
-of them only ever flies left; Cecco drew them tail first rather than
-spend the bytes on a second facing.  The port mirrors them instead.
+**One frame is drawn backwards.**  The missiles (10, 11) face left,
+which is the way they always fly, but the rocket that hunts a lingering
+player (36) faces right and flies left all the same.  The port mirrors
+that one; the missiles it leaves alone.
 
 ## Bullets
 
@@ -426,3 +426,19 @@ the player sprite's own size; crouching takes a different y branch.
 The numbers the callers pass are 0x0804 for an energy ball or a wall
 emitter's shot (4 units by 8 pixels) and 0x1008 for a mine's missile
 and the hunting rocket (16 by 8).
+
+Crouching (0x9C00) takes the player's top down by six pixels and leaves
+his feet where they are - 26 lines instead of 32 - and that six pixels
+is the whole of what ducking buys: a gun emplacement's shot leaves the
+muzzle at `row*8 + 3`, three pixels into the cell above the one the
+player's head fills when he stands on the floor below it.
+
+## Randomness
+
+`0xAD36` returns the Z80's refresh register, which is uncorrelated
+enough for what the game asks of it: almost every timer in Exolon is
+"fire when a random byte is over a threshold", read once per frame per
+object.  Anything that stands in for it has to be uncorrelated *between
+consecutive calls*, not merely uniform over time - a generator whose
+successive bytes drift slowly turns those thresholds into bursts, and
+the wall guns lay down a solid line of shots instead of the odd one.

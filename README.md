@@ -49,7 +49,7 @@ and in play:
 | ← → | walk - Vitorc turns to face the way he is going |
 | ↑ | jump; in a teleport booth or a suit booth, use it |
 | ↓ | crouch - a gun emplacement's shot passes over you |
-| ФИКС (LCtrl) or space | fire the laser |
+| ФИКС (LCtrl) or space | fire - one bolt, or two in the power suit |
 | numpad ВВОД (RCtrl) | throw a grenade |
 | АП2 | pause |
 | СТОП | leave the game |
@@ -69,8 +69,16 @@ rock formations that block the way out of a zone need a **grenade** -
 as in the original, where the bolt only ever tests the sprite map.  The
 grenade is a lob, not a blast: it leaves your shoulder climbing, flies
 level trailing smoke, then dives, and it destroys the one thing it
-lands on.  Thrown from directly under an emplacement it sails clean
-over; stand back and let the dive do the work.
+lands on.  It has a range, so judge the distance - thrown from too far
+back it is in the ground before it arrives.  Whatever you blow up, the
+explosion itself cannot hurt you.
+
+The pistol fires a single pixel, and it goes where you are looking: a
+wall gun's two barrels are two separate targets, and standing you can
+only cut down the upper stream and crouched only the lower.  The
+**power suit** is worth finding for more than the free hit it absorbs -
+it gives you two guns, eight pixels apart, firing a bolt you can
+actually see, and that takes down both streams at once.
 
 The white canisters refill the laser and the yellow ones the grenades:
 walk into them.  Standing in a teleport booth and pressing the up arrow
@@ -113,11 +121,14 @@ power suit are worked with the up arrow exactly as on the Spectrum.
 See `.claude/docs/re-notes.md` for where each of those lives in the
 original.
 
-Three things are deliberately **not** the original.  Everything turns
-round: the Spectrum sheet holds one facing for the player and its
-plotter cannot mirror, so there Vitorc walks left backwards and the
-missiles and the hunting rocket fly tail first - the port reverses each
-line of the frame through a lookup table instead.  A force field emits
+Four things are deliberately **not** the original.  Everything faces
+the way it is going: the Spectrum sheet holds one facing for the player
+and its plotter cannot mirror, so there Vitorc walks left backwards,
+and the rocket that hunts a lingering player is drawn from a
+right-facing frame although it only ever flies left - the port reverses
+those lines through a lookup table instead.  The power suit is a
+weapon as well as armour, with its two guns and their heavier bolt,
+where the original's only absorbed a hit.  A force field emits
 six energy balls rather than eight, because on this machine a moving
 sprite costs several times what the Spectrum's XOR plotter did, the
 balls all swirl inside the ring's two cells and overlap into one blob
@@ -125,6 +136,12 @@ anyway, and the two extra would have cost a fifth of the frame rate in
 those zones.  And the title screen's second option is infinite lives
 rather than REDEFINE KEYS, which a machine with one keyboard layout
 does not need.
+
+The other departure is invisible: `RANDOM` is a 16-bit LCG rather than
+the Z80 refresh register the original reads, because almost every timer
+in the game is "fire when a random byte clears a threshold" sampled
+once a frame, and a generator whose consecutive bytes are correlated
+turns those into bursts.
 
 ## The machine, and what it does to the graphics
 
@@ -187,7 +204,7 @@ carried an AY score that the 48K one never played, and
 | `uknc_control.py` | drive the headless UKNC emulator (boot, keys, screenshots, memory dumps, audio capture) |
 | `zx_control.py` | drive ZEsarUX on the original tape (keys, screenshots, memory dumps) |
 | `tap_extract.py` `z80dis.py` `z80_disasm.py` `z80_trace.py` `zx_view.py` | the ZX side: tape blocks, disassembly, code/data tracing, graphics viewing |
-| `verify_build.py` | the checks behind `make verify`, scripted runs of the title screen and of gameplay included (the menu's two options, facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, wall guns, mine missiles, the lingering-player rocket) |
+| `verify_build.py` | the checks behind `make verify`, scripted runs of the title screen and of gameplay included (the menu's two options, facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, wall guns, mine missiles, the lingering-player rocket, and what each gun can and cannot shoot down) |
 | `build_toolchain.py` | rebuild `bin/` from source |
 
 Resources are the source of truth.  Edit `src/res/zones/zones.txt`
@@ -196,11 +213,13 @@ Resources are the source of truth.  Edit `src/res/zones/zones.txt`
 line), `src/res/tiles/tiles.txt` (`#` bitmaps),
 `src/res/sprites/*.txt` or `src/res/music/title.txt` and rebuild.
 `make extract` regenerates them from the tape, including frame 45 of
-`small.txt` (the laser bolt, which the original drew as a bare pattern)
+`small.txt` (the power suit's bolt - the original drew the player's
+fire as a bare pattern and had no sprite for it)
 and frames 46..52, which are the grenade, the energy ball, the three
 sparks and a wall gun's shot, copied in from the original's *second*,
 16x8 sprite bank at 0xED40 - the port has one sprite format where the
-Spectrum had two.
+Spectrum had two.  Frame 45 is the power suit's own bolt, which has no
+original at all.
 
 ## Credits
 

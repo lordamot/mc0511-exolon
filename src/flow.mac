@@ -79,20 +79,28 @@ BLIT_MARKS:	TST	MARKN
 
 ; ---- randomness --------------------------------------------------
 ; The original reads the Z80's refresh register (0xAD36); the UKNC has
-; nothing like it, so this is a 16-bit Galois LFSR reset at the start of
-; a game.  Clobbers R0 only, and returns a byte in it.
+; nothing like it, so this is a 16-bit linear congruential generator,
+; reset at the start of a game.  Clobbers R0 only, and returns a byte.
+;
+; It used to be a Galois LFSR stepped once per call, which was a
+; mistake: one shift a call leaves consecutive bytes highly correlated,
+; so anything that fires on "a random byte over a threshold" fired in
+; bursts - the wall guns laid down an unbroken line of shots instead of
+; the odd one.  Multiplying mixes the whole word every call, and the
+; high byte of an LCG is the half worth using.
 RNDTMP:		.WORD	0
+RNDMUL	= 25173.
+RNDADD	= 13849.
 
 RANDOM:		MOV	R1,RNDTMP
-		MOV	RNDSEED,R0
-		CLC
-		ROR	R0
-		BCC	1$
-		MOV	#132000,R1	; x^16 + x^14 + x^13 + x^11
-		XOR	R1,R0
-1$:		MOV	R0,RNDSEED
-		MOV	RNDTMP,R1
+		MOV	RNDSEED,R1
+		MUL	#RNDMUL,R1	; R1 is odd: just the low 16 bits
+		ADD	#RNDADD,R1
+		MOV	R1,RNDSEED
+		MOV	R1,R0
+		SWAB	R0
 		BIC	#177400,R0
+		MOV	RNDTMP,R1
 		RETURN
 
 ; ---- score -------------------------------------------------------

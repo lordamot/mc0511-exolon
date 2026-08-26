@@ -201,6 +201,7 @@ SPEC_SCAN:	CLR	R1			; how many force fields first,
 		ASL	R2
 		MOV	R4,EMITROW(R2)
 		MOV	R3,EMITCOL(R2)
+		CLR	EMITT(R2)
 		INC	NEMIT
 		BR	5$
 10$:		CMP	R0,#CL_MINE	; a mine, which throws missiles in

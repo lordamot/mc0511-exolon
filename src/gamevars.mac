@@ -80,6 +80,7 @@ SUITCOL:	.BLKW	NSPEC
 NEMIT:		.BLKW	1	; wall emitters in this zone (0..EMITMAX)
 EMITROW:	.BLKW	EMITMAX
 EMITCOL:	.BLKW	EMITMAX
+EMITT:		.BLKW	EMITMAX	; frames before each may fire again
 NMINE:		.BLKW	1	; the zone has a mine throwing missiles
 MINEROW:	.BLKW	1	; and the cell it is anchored in
 MINECOL:	.BLKW	1
