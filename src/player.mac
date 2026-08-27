@@ -545,12 +545,50 @@ PL_ZONEEDGE:	CMP	PX,#124.
 		BLO	1$
 		CLR	ZONE		; wrap round after the last zone
 1$:		CLR	PX
+		CLR	PJUMP		; the original resets the jump on a
+		BIC	#7,PY		; zone switch (0x8253); realigning y
+					; keeps the floor tests on cell rows,
+					; so a respawn cannot start midway
+					; through one and sink for ever
 		MOV	PX,PXENT
 		MOV	PY,PYENT
 		MOV	#1,ZONELOAD
 		MOV	#SFX_ZONE,SND_REQ
 		CALL	SCORE_ZONE
 9$:		RETURN
+
+; ------------------------------------------------------------------
+; After a zone load the body may overlap scenery: neighbouring zones
+; do not share a floor height everywhere, and menu option 3 can drop
+; the player anywhere at all.  Lift him a cell row at a time until the
+; four rows of his body are clear; gravity settles him onto the floor.
+PL_SNAP:	MOV	PY,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOV	R0,PCROW
+		MOV	#4,PTRI
+1$:		MOV	PX,R1
+		ASR	R1
+		ASR	R1
+		MOV	R1,PCCOL
+		MOV	#4,PTCI
+2$:		MOV	PCROW,R0
+		MOV	PCCOL,R1
+		CALL	MAP_BLOCK
+		TST	R0
+		BNE	5$		; blocked: lift and rescan
+		INC	PCCOL
+		DEC	PTCI
+		BNE	2$
+		INC	PCROW
+		DEC	PTRI
+		BNE	1$
+		RETURN			; the body is in the clear
+5$:		SUB	#8.,PY
+		BGE	PL_SNAP
+		CLR	PY		; nowhere clear: stop at the top
+		RETURN
 
 ; ------------------------------------------------------------------
 ; The land mines and the rising pumps kill through the original's

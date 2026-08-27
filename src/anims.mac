@@ -15,6 +15,9 @@
 ;             it while it cycles is fatal, suit excepted
 ;   class 15  a flickering energy arc between a pair of pylons, two
 ;             16x16 frames wide (0xA7D6) - scenery, not a hazard
+;   class 16  the level gate's trigger cell (0xA817): its column is
+;             noted here and gate.mac runs the inter-level bonus when
+;             the player reaches it
 ;   class 17  the vertical laser beam under a hovering platform: it
 ;             reaches the ground, cycles its colour, kills on touch
 ;             and takes BEAM_HITS laser bolts to cut down (0xABCF)
@@ -34,6 +37,7 @@ ANIMS_INIT:	CLR	NFLM
 		CLR	NPUMPS
 		CLR	BEAMON
 		CLR	BEAMPH
+		CLR	GATEON
 		CLR	FLYON
 		CLR	FLYCD
 		CLR	FLMPH
@@ -145,7 +149,14 @@ ANIMS_INIT:	CLR	NFLM
 		MOVB	#95.,PMPCNT(R0)		; the original loads 0x5F
 		INC	NPUMPS
 		BR	29$
-22$:		CMP	R0,#CL_ARC
+22$:		CMP	R0,#CL_GATE	; the level gate's trigger column
+		BNE	23$		; (gate.mac watches for the player)
+		ASL	R2
+		ASL	R2		; x = col*4
+		MOV	R2,GATEX
+		MOV	#1,GATEON
+		BR	29$
+23$:		CMP	R0,#CL_ARC
 		BNE	29$
 		MOV	R5,-(SP)
 		MOV	R4,-(SP)
@@ -558,16 +569,25 @@ EN_ARC:		CALL	RANDOM
 ; anchor, then four frames up, eleven held, four down, and the counter
 ; rerolls.  It is drawn from player-bank frame 24 and, while cycling,
 ; kills whoever it touches - except the power suit (0x9CAA).
+; Only the part of a pump above its anchor row ever shows - the anchor
+; is the ground line it rises out of - so erase and draw both stop
+; there instead of painting the shaft into the ground.
 PUMPS_ERASE:	TST	NPUMPS
 		BEQ	9$
 		CLR	PMPI
 1$:		MOV	PMPI,R2
 		MOVB	PMPCUR(R2),R0
 		BIC	#177400,R0
-		MOVB	PMPCOL(R2),R1
+		MOVB	PMPROW(R2),R3
+		BIC	#177400,R3
+		SUB	R0,R3		; rows above the ground line
+		BLE	2$		; at rest: nothing was drawn
+		CMP	R3,#4
+		BLOS	11$
+		MOV	#4,R3
+11$:		MOVB	PMPCOL(R2),R1
 		BIC	#177400,R1
 		MOV	#3,R2
-		MOV	#4,R3
 		CALL	MARK_RECT
 		TST	R4
 		BEQ	2$
@@ -607,6 +627,18 @@ PUMPS_UPD:	TST	NPUMPS
 5$:		MOV	PMPI,R2
 		MOVB	PMPCUR(R2),R0
 		BIC	#177400,R0
+		MOVB	PMPROW(R2),R3
+		BIC	#177400,R3
+		SUB	R0,R3			; rows above the ground line
+		BLE	8$			; at rest it is fully sunk
+		CMP	R3,#4
+		BLOS	51$
+		MOV	#4,R3
+51$:		MOV	R3,-(SP)
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		MOV	R3,SPRH			; frame lines down to the ground
 		ASL	R0
 		ASL	R0
 		ASL	R0
@@ -618,16 +650,16 @@ PUMPS_UPD:	TST	NPUMPS
 		ASL	R1
 		CLR	SPRMIR
 		MOV	#PUMP_FR,R0
-		CALL	SPR_PLAYER
+		CALL	SPR_PLAYERH
 		MOV	PMPI,R2
 		MOVB	PMPCUR(R2),R0
 		BIC	#177400,R0
 		MOVB	PMPCOL(R2),R1
 		BIC	#177400,R1
 		MOV	#3,R2
-		MOV	#4,R3
+		MOV	(SP)+,R3
 		CALL	MARK_RECT
-		INC	PMPI
+8$:		INC	PMPI
 		CMP	PMPI,NPUMPS
 		BLO	1$
 9$:		RETURN

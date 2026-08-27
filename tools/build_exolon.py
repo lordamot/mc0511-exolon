@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
-PROG_SIZE = 0o110000        # must match PROG_SIZE in src/defs.mac
+PROG_SIZE = 0o115000        # must match PROG_SIZE in src/defs.mac
 DISK_SIZE = 819200
 SECTOR = 512
 VOLUME = "EXOLON"           # the disk's name, in the RT-11 home block

@@ -288,10 +288,13 @@ ENT_ONE:	MOV	R5,ECUR
 9$:		JMP	EN_KILL
 
 ; ---- player bolt -------------------------------------------------
-; The original's bolt (0x83DD) never touches scenery: it dies on the
-; sprite-occupancy map, so the only things it destroys are the moving
-; enemies and the shots in the air.  Emplacements and rock formations
-; are the grenade's job - see GREN_BLAST.
+; The original's bolt (0x83DD) destroys only what is in the air - the
+; enemy shots, the flyers and the energy balls - and chips at the
+; laser beam.  Against anything the solid map holds - plain scenery
+; and every standing object alike, the mine's own cell included - it
+; simply bursts in a spark (0x8444 -> 0x981D).  Opening up the
+; emplacements, the rock formations and the rest of the standing
+; scenery is the grenade's job alone - see GREN_BLAST.
 ;
 ; The update runs five times a frame at one unit a step, exactly as the
 ; original's main loop calls 0x83DD five times - that is both the
@@ -313,11 +316,13 @@ EN_BOLT:	MOV	#5,BOLTN
 		MOV	R2,R0
 		CALL	CLASS_BLOCK
 		BEQ	2$
-		MOV	ECUR,R5
-		CALL	OBJ_AT_BOLT	; a live target in the way?
-		BEQ	91$
-		JMP	EN_HITOBJ
-91$:		JMP	EN_KILL		; plain scenery just stops the bolt
+		MOV	ECUR,R5		; anything solid stops the bolt in
+		MOVB	E.X(R5),R1	; a spark - live objects included
+		BIC	#177400,R1
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		CALL	SPARK_NEW
+		JMP	EN_KILL
 2$:		MOV	ECUR,R5
 		DEC	BOLTN
 		BNE	10$
@@ -708,9 +713,10 @@ EN_ROCK:	MOVB	E.X(R5),R0
 ; ---- a mine's homing missile -------------------------------------
 ; 0xA23A launches one whenever the last has gone, at a random height on
 ; the right-hand edge, and keeps doing it as long as the mine's own cell
-; is still class 13 - so the only way to stop them is to shoot the mine
-; out.  0xA26B flies it: a pixel a frame towards the player's height,
-; one x unit a frame until MINE_FAST and two after that.
+; is still class 13 - so the only way to stop them is to blow the mine
+; up with a grenade (a bolt bursts against its cell like against any
+; other solid).  0xA26B flies it: a pixel a frame towards the player's
+; height, one x unit a frame until MINE_FAST and two after that.
 MINE_CHECK:	TST	NMINE
 		BEQ	9$
 		TST	PDEAD
@@ -721,7 +727,7 @@ MINE_CHECK:	TST	NMINE
 		MOV	MINECOL,R1
 		CALL	MAP_CLASS
 		CMP	R0,#CL_MINE
-		BNE	9$		; the mine itself has been shot out
+		BNE	9$		; the mine itself has been grenaded
 		CALL	RANDOM
 		BIC	#177600,R0
 		ADD	#MINE_Y0,R0
@@ -860,49 +866,6 @@ EN_KILL:	MOV	ECUR,R3		; it may already be on screen this
 EN_HITOBJ:	CALL	SCORE_HIT
 		MOV	ECUR,R5
 		JMP	EN_BOOMSTART
-
-; ------------------------------------------------------------------
-; Is the bolt at R5 inside the box of a live scenery object?  If so
-; the object is wiped out (its cells go, so the way is clear) and Z is
-; returned clear.  Every object with a bounding box is a target - that
-; is how the original marks what can be shot - except the two pickup
-; canisters, which are there to be walked into, and the emplacements
-; and rock formations, which only a grenade opens up.
-OBJ_AT_BOLT:	CALL	ENT_HOT			; R0 = cell row, R1 = column
-		MOV	#OBJLIST,R3
-		MOV	NLIVE,R4
-		BEQ	8$
-1$:		MOVB	O.OBJ(R3),R2
-		BIC	#177400,R2
-		BIT	#200,R2			; already destroyed
-		BNE	5$
-		CMP	R2,#OB_AMMO		; canisters are pickups, not
-		BEQ	5$			; targets
-		CMP	R2,#OB_AMMO2
-		BEQ	5$
-		CALL	OBJ_GRENONLY		; emplacements and rock need
-		BNE	5$			; a grenade
-		MOVB	O.X0(R3),R2
-		CMP	R1,R2
-		BLT	5$
-		MOVB	O.X1(R3),R2
-		CMP	R1,R2
-		BGT	5$
-		MOVB	O.Y0(R3),R2
-		CMP	R0,R2
-		BLT	5$
-		MOVB	O.Y1(R3),R2
-		CMP	R0,R2
-		BGT	5$
-		CALL	OBJ_CLEAR
-		MOV	ECUR,R5
-		MOV	#1,R0
-		RETURN
-5$:		ADD	#O.SIZE,R3
-		SOB	R4,1$
-8$:		MOV	ECUR,R5
-		CLR	R0
-		RETURN
 
 ; Remove the live object at R3: its display list is replayed in erase
 ; mode, then the rectangle it stood in is redrawn and blitted.
@@ -1348,23 +1311,6 @@ ENT_HITPLAYER:	TST	PDEAD
 		MOV	#1,R0		; Z clear: hit
 		RETURN
 9$:		CLR	R0
-		RETURN
-
-; ------------------------------------------------------------------
-; Objects a laser bolt cannot open up: the gun emplacements and the
-; rock formations that block the way out of a zone.  Z clear = the
-; object at R3 needs a grenade.  Preserves R3.
-OBJ_GRENONLY:	MOVB	O.OBJ(R3),R2
-		BIC	#177600,R2		; ignore the destroyed flag
-		CMP	R2,#OB_CANNON
-		BEQ	1$
-		CMP	R2,#OB_GUN
-		BEQ	1$
-		CMP	R2,#OB_ROCK
-		BEQ	1$
-		CLR	R2			; Z set: a bolt may take it
-		RETURN
-1$:		MOV	#1,R2
 		RETURN
 
 ; ------------------------------------------------------------------

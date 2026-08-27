@@ -7,7 +7,7 @@ Run once (the files are the source of truth afterwards):
 
 Written resources:
 
-    src/res/tiles/tiles.txt        672 8x8 glyphs (font + scenery tiles)
+    src/res/tiles/tiles.txt        684 8x8 glyphs (font + scenery tiles)
     src/res/objects/objects.txt    the scenery display lists
     src/res/zones/zones.txt        125 zones as {row, col, object} triples
     src/res/sprites/player.txt     25 player frames, 24x32
@@ -28,10 +28,12 @@ from exolon_re import (ROOT, load_image, zone_objects, object_table,
 
 RES = ROOT / "src/res"
 
-# One flat tile bank: everything the game draws as an 8x8 glyph.
+# One flat tile bank: everything the game draws as an 8x8 glyph.  The
+# last 12 tiles (0xECE0..0xED3F) are the bonus screen's border pieces,
+# used by the level-gate screens rather than any display list.
 TILE_ORG = 0xD7E0
-TILE_END = 0xECE0
-TILE_COUNT = (TILE_END - TILE_ORG) // 8      # 672
+TILE_END = 0xED40
+TILE_COUNT = (TILE_END - TILE_ORG) // 8      # 684
 
 PLAYER_ORG, PLAYER_FRAMES, PLAYER_W, PLAYER_H = 0xEF80, 25, 3, 32
 SMALL_ORG, SMALL_FRAMES, SMALL_W, SMALL_H = 0xF8E0, 57, 2, 16
@@ -297,6 +299,7 @@ AUTHOR|BY RAFFAELE CECCO
 PORT|UKNC PORT
 START|1 START GAME
 LIVESOPT|2 INFINITE LIVES
+ZONEOPT|3 START FROM ZONE
 ON|ON
 OFF|OFF
 COPY|HEWSON 1987
@@ -307,6 +310,23 @@ LIVES|LIVES
 ZONES|ZONES
 GAMEOVER|GAME OVER
 PAUSED|PAUSED
+; the level gate's window and the inter-level bonus screen
+BRAVERY|BRAVERY BONUS
+LIVESB|LIVES BONUS
+X1000|X 1000
+PRESSF|PRESS FIRE TO
+RESUME|RESUME PLAY
+B00000|00000
+BONTIT|EXOLON BONUS SCREEN!
+BONPTR|PRESS FIRE TO STOP POINTER
+BZ1|01000
+BZ3|03000
+BZ5|05000
+BZ7|07000
+CONGR1|CONGRATULATIONS!
+CONGR2|YOU HAVE PROVEN YOUR
+CONGR3|COMBAT ABILITIES
+CONGR4|TO THE FULL
 """
 
 

@@ -1,2 +1,10 @@
 		.EVEN
 PP_END:				; end of the block copied into PPU RAM
+
+; Once PP_MAIN_LOAD has pushed the block into PPU RAM the CPU-side
+; copy is dead weight, so the two tables REV_INIT builds at runtime
+; overlay it (REV_INIT runs after the load; see main.mac).
+REVTAB	= PP_START		; byte -> its bits reversed: mirrors the
+				; player when he faces left
+DUPTAB	= PP_START+400		; byte -> the same byte in both halves of
+				; a word, one pixel row of a 2-plane sprite

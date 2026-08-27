@@ -291,8 +291,10 @@ REV_INIT:	CLR	R0
 
 ; SPR_PLAYER: R0 = frame, R1 = x (2-px units), R2 = y (pixels).  The
 ; player fills his frame, so he clears the extents the entity kinds set.
+; SPR_PLAYERH draws only the top SPRH lines of the frame (0 = all 32) -
+; the rising pumps use it to stop at the ground line.
 SPR_PLAYER:	CLR	SPRH
-		CLR	SPRC
+SPR_PLAYERH:	CLR	SPRC
 		MOV	R0,R4
 		ASL	R4
 		ASL	R4
@@ -304,8 +306,10 @@ SPR_PLAYER:	CLR	SPRH
 		ADD	R3,R4		; frame*96
 		ADD	#PLAYER_SPR,R4
 		MOV	R4,SPRSRC
+		MOV	SPRH,R5
+		BNE	1$
 		MOV	#32.,R5
-		MOV	#3,TMPA		; source bytes per line
+1$:		MOV	#3,TMPA		; source bytes per line
 		BR	SPR_GO
 
 ; SPR_SMALL: R0 = frame, R1 = x, R2 = y.  2 bytes x 16 lines, of which

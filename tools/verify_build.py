@@ -46,11 +46,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import resources as R
 import zone_render as Z
+
+# an unhandled exception should land in the terminal, not in Ubuntu's
+# apport crash-report dialog (apport installs a system-wide excepthook)
+sys.excepthook = sys.__excepthook__
+
 import exolon_re as E
 import rt11_home as HOME
 
 ROOT = Path(__file__).resolve().parent.parent
-PROG_SIZE = 0o110000
+PROG_SIZE = 0o115000
 
 fails = []
 
@@ -127,7 +132,7 @@ screenshot {out_png.with_suffix('.title.bmp')}
 press {K_ONE:o} 3
 run 120
 screenshot {out_png}
-dumpcpu 0140000 3072 {out_png.with_suffix('.cells.bin')}
+dumpcpu 0145000 3072 {out_png.with_suffix('.cells.bin')}
 quit
 """
     with tempfile.NamedTemporaryFile("w", suffix=".script",
@@ -175,7 +180,8 @@ NENT = 48
 EK_ROCK_FRAME = 36        # the hunting rocket's 16x16 frame
 C_SIZE, C_ROW = 4, 128
 GUN_TILE = 191
-BUF = 0o110000
+BUF = 0o115000
+CELLS = 0o145000
 
 # The firmware boot menu wants "1" then ENTER; the game's own title
 # screen is started with "1" as well (K_ONE), and "2" toggles infinite
@@ -379,7 +385,7 @@ def gameplay(tmpdir):
     # the dive brings it down onto the emplacement, and from too far
     # back it is in the ground before it gets there.
     objs2 = td / "objs2.bin"
-    gcell = 0o140000 + 18 * C_ROW + 20 * C_SIZE + 2
+    gcell = 0o145000 + 18 * C_ROW + 20 * C_SIZE + 2
     gv = emu(alive(GROUND) + f"{poke16(A_PX, 72)}run 4\n"
              f"press {K_GREN} 4\nrun 60\n"
              f"dumpcpu {A_OBJLIST:o} 32 {objs2}\n"
@@ -543,7 +549,7 @@ def gameplay_new(td, v):
     cells = [td / f"c{i}.bin" for i in range(4)]
     body = (alive(GROUND)
             + f"run 20\npokecpu {A_OBJLIST + O_SIZE + O_T:o} 11\n")
-    body += "".join(f"run 1\ndumpcpu 0140000 3072 {f}\n" for f in cells)
+    body += "".join(f"run 1\ndumpcpu 0145000 3072 {f}\n" for f in cells)
     emu(body, td)
 
     def tile(blob, r, c):
@@ -552,9 +558,13 @@ def gameplay_new(td, v):
 
     seq = [tile(f.read_bytes(), grow, gcol) for f in cells]
     anim = list(range(GUN_TILE + 16, GUN_TILE + 31, 2))
+    # the gun also fires on its own, so the first sample can still show
+    # the tail of a natural recoil: judge from the poked cycle's start
+    # (its highest tile) onwards
+    poked = seq[seq.index(max(seq)):] if seq else []
     check("a firing emplacement plays its recoil",
-          len(set(seq)) >= 3 and all(t in anim for t in seq)
-          and seq == sorted(seq, reverse=True),
+          len(set(poked)) >= 3 and all(t in anim for t in seq)
+          and poked == sorted(poked, reverse=True),
           f"tiles {seq} at cell ({grow}, {gcol})")
 
     # --- a force field's energy balls -----------------------------
@@ -593,6 +603,33 @@ def gameplay_new(td, v):
               m1[0][1] < m0[0][1] and near1 <= near0,
               f"x {m0[0][1]} -> {m1[0][1]}, y {m0[0][2]} -> {m1[0][2]} "
               f"against his {py_}")
+
+    # A laser bolt cannot shoot the mine out: it bursts in a spark
+    # against the mine's cell like against any other solid, and the
+    # class-13 cell that keeps the missiles coming stays (only a
+    # grenade opens standing scenery, as in the original's 0x83DD /
+    # 0x93E2 split).  The player is pinned at the mine's height so the
+    # bolts fly straight into it.
+    A_MINEROW, A_MINECOL = sym("MINEROW"), sym("MINECOL")
+    pv = emu(f"run 10\n{poke16(A_ZONE, 11)}{poke16(A_ZONELOAD, 1)}run 30\n"
+             f"peekcpu {A_MINEROW:o}\npeekcpu {A_MINECOL:o}\n", td)
+    mr, mc = pv[0], pv[1]
+    pin = poke16(A_PY, mr * 8 - 14)
+    shot = f"{pin}press {K_FIRE} 2\n{pin}run 2\n{pin}run 2\n{pin}run 2\n"
+    cellw = CELLS + mr * C_ROW + mc * C_SIZE + 2
+    se = td / "minespark.bin"
+    sv = emu(f"run 10\n{poke16(A_ZONE, 11)}{poke16(A_ZONELOAD, 1)}run 30\n"
+             + alive() + quiet()
+             + poke16(A_PX, max(mc * 4 - 30, 0)) + poke16(sym("PFACE"), 1)
+             + shot * 3
+             + f"dumpcpu {A_ENTS:o} {ENTBYTES} {se}\n"
+             f"peekcpu {cellw:o}\n", td)
+    sparks = [x for x in ents(se.read_bytes()) if x[0] == EK_SPARK]
+    check("a laser bolt bursts on the mine in a spark",
+          len(sparks) >= 1, f"{len(sparks)} sparks")
+    check("and leaves the mine to its work",
+          (sv[0] >> 8) & 0xFF == 13,
+          f"cell class {(sv[0] >> 8) & 0xFF}")
 
     # --- the wall emitters (the pair of guns on a wall) -----------
     A_NEMIT = sym("NEMIT")
@@ -893,7 +930,6 @@ def features(tmpdir):
     A_PX, A_PY, A_PDEAD = sym("PX"), sym("PY"), sym("PDEAD")
     A_PSUIT, A_LIVES, A_ENTS = sym("PSUIT"), sym("LIVES"), sym("ENTS")
     A_CHEAT, A_AMMO = sym("CHEAT"), sym("AMMO")
-    CELLS = 0o140000
     ENTBYTES = NENT * E_SIZE
     EK_ARC = 13
     FLAME_T, MBLINK_T, BEAM_T = 112, 120, 128
@@ -1059,6 +1095,31 @@ def features(tmpdir):
     check("swooping, not hanging", moved or not live0,
           f"positions {live0} then {sorted(live1.values())}")
 
+    # --- the level gate (class 16) and its bonus sequence ---------
+    A_GATEON, A_GATEX = sym("GATEON"), sym("GATEX")
+    gv = emu(zone(24) + f"peekcpu {A_GATEON:o}\npeekcpu {A_GATEX:o}\n", td)
+    check("zone 24 arms its level gate", gv[0] == 1 and gv[1] > 0,
+          f"on {gv[0]}, x {gv[1]}")
+    # walk into it: the whole modal sequence runs (window, awards,
+    # bonus screen, pointer stopped by fire) and play resumes in the
+    # next level's first zone with the original's entry position, one
+    # more life and the refills
+    fires = "".join(f"run 60\npress {K_FIRE} 4\n" for _ in range(12))
+    sv = emu(zone(24) + poke16(A_CHEAT, 2) + poke16(A_LIVES, 7)
+             + poke16(A_PSUIT, 12) + poke16(A_PX, gv[1])
+             + fires + "run 120\n"
+             + f"peekcpu {A_ZONE:o}\npeekcpu {A_PX:o}\npeekcpu {A_PY:o}\n"
+             f"peekcpu {A_LIVES:o}\npeekcpu {A_PSUIT:o}\n"
+             f"peekcpu {A_AMMO:o}\n", td)
+    check("crossing it moves play to zone 25",
+          sv[0] == 25, f"zone {sv[0]}")
+    check("at the original's entry position",
+          sv[1] == 0 and sv[2] == 120, f"({sv[1]}, {sv[2]})")
+    check("with an extra life, the suit off and ammo refilled",
+          sv[3] == 8 and sv[4] == 0 and sv[5] >= 80,
+          f"lives {sv[3]}, suit {sv[4]}, ammo {sv[5]} (the trailing "
+          "fire presses spend a few rounds)")
+
 
 def white_rows():
     """Every playfield row the player can reach must offer white, or the
@@ -1100,7 +1161,7 @@ def main():
           bad == 0, f"{bad} cells differ" if bad else "")
 
     tiles = R.read_tiles()
-    check("glyph bank", len(tiles) == 672, f"{len(tiles)} tiles")
+    check("glyph bank", len(tiles) == 684, f"{len(tiles)} tiles")
     lists = R.read_lists()
     check("display lists", len(lists) >= 62, f"{len(lists)} lists")
     zones = R.read_zones()

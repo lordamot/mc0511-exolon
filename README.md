@@ -63,7 +63,7 @@ at you as you come; force fields fill their rings with energy balls
 that swirl about and kill on contact - and where a pair of pylons
 stands with nothing between it, the balls drift loose; and mines throw
 a missile in from the right that comes down to your own height, over
-and over, until you shoot the mine out.
+and over, until you blow the mine up with a grenade.
 
 The scenery is alive the way the original's is.  Jet flames flicker
 under the hovering platforms, the parked spaceships and the pods; the
@@ -79,10 +79,13 @@ you - spheres, saucers and spinners on the original's six byte-coded
 paths, four-frame animated, each worth points to shoot down and fatal
 to the touch.
 
-A laser bolt shoots down what is in the air, destroys the moving
-enemies and pops the energy balls, but the gun emplacements and the
-rock formations that block the way out of a zone need a **grenade** -
-as in the original, where the bolt only ever tests the sprite map.  The
+A laser bolt shoots down what is in the air - the enemy fire, the
+flyers, the energy balls - and against anything that stands on the
+ground it just bursts in a spark, as on the Spectrum.  The gun
+emplacements, the rock formations that block the way out of a zone,
+the mines, dishes, hoppers and every other piece of standing scenery
+need a **grenade** - in the original the bolt only ever dies on the
+solid map, and 0x93E2 lets the grenade take out exactly one object.  The
 grenade is a lob, not a blast: it leaves your shoulder climbing, flies
 level trailing smoke, then dives, and it destroys the one thing it
 lands on.  It has a range, so judge the distance - thrown from too far
@@ -106,10 +109,23 @@ same key in a power-suit booth puts the armour on.
 comes in from the right at your height, trailing smoke, and it does not
 miss twice.
 
+Every 25th zone - 24, 49, 74, 99 and 124 - ends its level at a **gate**
+between two tall pylons.  Reach it and the end-of-level ceremony runs
+as on the Spectrum: a framed window totals your LIVES BONUS (1000 a
+life, paid at once) and - if you arrive without the power suit - a
+BRAVERY BONUS of 10000, ticked onto the score in eighty steps; the
+last gate adds its CONGRATULATIONS screen.  Then the EXOLON BONUS
+SCREEN appears: a pointer sweeps down a ladder of eight prize rows,
+fire stops it, and only the odd rows pay - 1000, 3000, 5000 or 7000.
+The pointer's counter keeps running from one gate to the next, so the
+row it lands on is anyone's guess.  You leave with an extra life (nine
+at most), the suit off, everything refilled, at the next level's first
+zone.
+
 ## What is faithful, and what is not
 
 The **content** is the original's, byte for byte: the 125 zone object
-lists, the 62 scenery display lists, the 672-glyph tile bank, the
+lists, the 62 scenery display lists, the 684-glyph tile bank, the
 collision classes, the player and 16x16 sprite sheets and the three
 music streams are all extracted from the tape.  `make verify` renders
 every zone twice - once by interpreting the original's data structures

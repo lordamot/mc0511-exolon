@@ -11,11 +11,15 @@ and every resource generated from editable text files.
 | Range | What |
 |---|---|
 | 0..777 | boot sector (src/boot.mac) |
-| 1000..107777 | program + data (code, tiles, lists, zones, sprites) |
-| 110000..137777 | back buffer: 192 lines x 32 cell words (planes 1+2) |
-| 140000..145777 | cell buffer: 24 x 32 x {tile word, slot byte, class byte} |
-| 146000..152000 | game variables, entity and object lists |
-| 157000 | stack top (RAM ends at 157777; above that is the I/O page) |
+| 1000..114777 | program + data (code, tiles, lists, zones, sprites) |
+| 115000..144777 | back buffer: 192 lines x 32 cell words (planes 1+2) |
+| 145000..152777 | cell buffer: 24 x 32 x {tile word, slot byte, class byte} |
+| 153000..156030 | game variables, entity and object lists |
+| 160000 | stack top (RAM ends at 157777; the first push lands at 157776) |
+
+The CPU-side copy of the PPU block (PP_START..PP_END) is dead once
+PP_MAIN_LOAD has pushed it into PPU RAM; the runtime-built REVTAB and
+DUPTAB tables overlay it (src/ppu_end.mac).
 
 Planes are 64 KB each; the CPU address space *is* planes 1 and 2
 interleaved (CPU byte 2N = plane1[N], 2N+1 = plane2[N]).  The visible
@@ -46,7 +50,7 @@ would need.
   used inks per row win, the rest snap to the nearest survivor.  That
   is the whole colour pipeline; no palette data is stored on disk.
 - Tiles are 1bpp 8x8 glyphs exactly as on the ZX (8 bytes each; the
-  bank holds 672, the font among them).  `CELL_DRAW` writes a cell into
+  bank holds 684, the font among them).  `CELL_DRAW` writes a cell into
   the back buffer by expanding the glyph into the two planes according
   to the cell's slot: 1 lights plane 1, 2 plane 2, 3 both.
 
@@ -164,11 +168,17 @@ player, `make shot` / `make demo` drive the headless emulator, and
     apart; menu option 3 (start from a chosen zone); and the
     performance pass - the dirty-cell bitmap, frame-skip catch-up,
     and a kilobyte and a half of buffers moved out of the image [DONE]
+13. class 16, the level gate (`src/gate.mac`): the end-of-level window
+    with the LIVES and BRAVERY bonuses, the CONGRATULATIONS screen
+    after zone 124, the EXOLON BONUS SCREEN with the fire-stopped
+    pointer, the extra life / suit-off / refills, and the next level's
+    entry position from the original's table at 0xAAE0; plus the
+    entry-position pass - the pumps clipped at their ground line, the
+    player lifted out of a mismatched entry floor after a zone load
+    (`PL_SNAP`), and menu option 3 starting a later zone at the very
+    left edge [DONE]
 
-Not yet ported: class 16, the level gate - the inter-level bonus
-screen at 0xA8DB with its pointer minigame (objects 42's anchors in
-zones 24, 49, 74, 99 and 124 do nothing; the zones still chain by
-walking off the right edge).
+Everything in the original is now ported.
 
 ## Notes from the implementation
 
@@ -247,7 +257,8 @@ walking off the right edge).
 - **Where the RAM ends.**  The UKNC CPU only has RAM below 0160000;
   0160000..0177777 is the I/O page in user mode.  Everything - program,
   back buffer, cell buffer, variables and stack - has to fit under
-  that, which is why PROG_SIZE is 0110000 and the stack top 0157000.
+  that, which is why PROG_SIZE is 0115000 and the stack top 0160000
+  (the first push predecrements to 0157776).
 - **The row palette is the whole colour pipeline.**  `ROW_ONE` weighs
   each ink in a row by the pixels its tiles light, keeps the three
   heaviest and snaps the rest to the nearest survivor (bitwise RGB

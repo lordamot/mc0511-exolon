@@ -5,7 +5,7 @@
 ; before the code (every label is then known everywhere) and returns
 ; the location counter to 0 for boot.mac at the end.
 ; ------------------------------------------------------------------
-		. = 146000
+		. = 153000
 
 ; PPU mailbox (written by the PPU program through @#177010/177014).
 ; CPU_VSYNC must directly follow KEYS_DATA - the PPU timer writes them
@@ -158,6 +158,19 @@ BEAMHIT:	.BLKW	1	; laser bolts taken so far
 BEAMPH:		.BLKW	1
 BEAMSAVE:	.BLKW	2*24.	; {tile, slot+class} of the covered cells
 
+; ---- the level gate (class 16) and its bonus screens -------------
+GATEON:		.BLKW	1	; this zone has a level gate
+GATEX:		.BLKW	1	; its trigger x, in 2-pixel units
+GATEPTR:	.BLKW	1	; the bonus pointer's counter - like the
+				; original's 0xA960 it runs on from one
+				; gate to the next
+GTROW:		.BLKW	1	; gate screen scratch
+GTR2:		.BLKW	1
+GTT:		.BLKW	1
+GTF:		.BLKW	1
+GTSL:		.BLKW	1
+GTI:		.BLKW	1
+
 FLYON:		.BLKW	1	; this zone has swooping flyers
 FLYPATH:	.BLKW	1	; their path byte code
 FLYFRB:		.BLKW	1	; 16x16 frame base
@@ -169,10 +182,8 @@ FLYS:		.BLKB	F.SIZE*NFLY
 ; ---- scratch ----------------------------------------------------
 ENTW:		.BLKW	1	; entity box for ENT_HITPLAYER, x units
 ENTH:		.BLKW	1	; and pixels
-REVTAB:		.BLKB	256.	; byte -> its bits reversed (REV_INIT builds
-				; both): mirrors the player when he faces left
-DUPTAB:		.BLKW	256.	; byte -> the same byte in both halves of a
-				; word, one pixel row of a two-plane sprite
+				; (REVTAB and DUPTAB overlay the dead
+				; CPU-side PPU block - see ppu_end.mac)
 SPRSHIFT:	.BLKW	1
 SPRMIR:		.BLKW	1	; nonzero = draw the frame mirrored
 SPRH:		.BLKW	1	; lines of a 16x16 frame to draw (0 = all)

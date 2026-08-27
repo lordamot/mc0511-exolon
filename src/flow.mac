@@ -185,7 +185,7 @@ SCORE_ADD:	MOV	#SCORE+5,R0
 		CLR	R2
 		CMP	R4,#71
 		BLOS	2$
-		SUB	#12.,R4
+		SUB	#10.,R4
 		MOV	#1,R2
 2$:		MOVB	R4,@R0
 		DEC	R0
@@ -208,9 +208,13 @@ SC_ZONE:	.ASCII	/000100/
 
 ; ---- game cycle --------------------------------------------------
 GAME_START:	CLR	ZONE
+		MOV	#8.,PXENT	; the first zone's classic start
 		TST	ZSELON		; menu option 3: start from a chosen
 		BEQ	1$		; zone instead of the first
 		MOV	ZSEL,ZONE
+		BEQ	1$
+		CLR	PXENT		; any other zone begins at the very
+					; left edge, as if walked into
 1$:		MOV	#1,RNDSEED
 		MOV	#7,LIVES
 		MOV	#99.,AMMO
@@ -218,8 +222,8 @@ GAME_START:	CLR	ZONE
 		CLR	PSUIT
 		CLR	GAMEOVER
 		CLR	PAUSEREQ
+		CLR	GATEPTR
 		CALL	SCORE_CLEAR
-		MOV	#8.,PXENT
 		MOV	#96.,PYENT
 		CALL	PLAYER_INIT
 		MOV	#1,ZONELOAD
@@ -238,6 +242,7 @@ GAME_RUN:	CALL	GAME_START
 3$:		TST	ZONELOAD
 		BEQ	2$
 		CALL	ZONE_LOAD
+		CALL	PL_SNAP		; entry floors differ between zones
 2$:		CALL	MARKS_CLEAR
 		CLR	DRAWSKIP
 20$:		CLR	DRAWOFF		; when the last frame overran its
@@ -252,7 +257,10 @@ GAME_RUN:	CALL	GAME_START
 		CALL	PUMPS_ERASE
 		CALL	PL_ERASE
 		CALL	PLAYER_UPD
-		CALL	PL_SPECIAL
+		CALL	GATE_CHECK	; the level gate freezes the game,
+		BEQ	27$		; runs its bonus screens and leaves
+		JMP	1$		; a zone load pending: restart
+27$:		CALL	PL_SPECIAL
 		CALL	SHOOT_BOLT
 		CALL	THROW_GREN
 		CALL	ENEMY_UPD
@@ -294,14 +302,16 @@ GAME_RUN:	CALL	GAME_START
 ; ------------------------------------------------------------------
 ; A display list stores the ZX ink (+1) in every cell it paints; the
 ; zone loader normally turns those into palette slots, but the title
-; screen paints its logo afterwards, so convert them here.  Cells the
-; text routines wrote already hold a slot (1..3) and are left alone.
+; screen (and the gate's bonus screens) paint their logo afterwards,
+; so convert them here.  Cells the text routines wrote already hold a
+; slot (1..3) and are left alone.  INKCELLS does the first R1 cells
+; through whatever ROWINK holds.
 TITLE_INKS:	MOVB	#13.,ROWPAL3
 		MOVB	#14.,ROWPAL3+1
 		MOVB	#15.,ROWPAL3+2
 		CALL	INK_MAP
-		MOV	#CELLS,R0
 		MOV	#15.*NCOLS,R1
+INKCELLS:	MOV	#CELLS,R0
 1$:		MOVB	C.SLOT(R0),R2
 		BIC	#177400,R2
 		CMP	R2,#3

@@ -1,0 +1,568 @@
+; ------------------------------------------------------------------
+; The level gate (collision class 16, the original's 0xA817) and the
+; inter-level bonus screens (0xA8DB).  Every 25th zone - 24, 49, 74,
+; 99 and 124 - has a gate structure whose display list files a class
+; 16 anim hook; when the player's x reaches the hook's column the
+; game freezes and the original's end-of-level sequence runs:
+;
+;   - a framed window over the zone: LIVES BONUS n X 1000 (scored at
+;     once) and, when the power suit is off, BRAVERY BONUS 10000,
+;     ticked onto the score in eighty steps of 125;
+;   - on the last gate (zone 124) a CONGRATULATIONS screen;
+;   - the EXOLON BONUS SCREEN: a pointer sweeps down a ladder of
+;     eight prize rows (only the odd ones pay 1000/3000/5000/7000)
+;     until fire stops it - the counter runs on from gate to gate,
+;     exactly as the original's 0xA960 does;
+;   - an extra life (capped at nine), the suit off, ammunition and
+;     grenades refilled, and play resumes at the next level's first
+;     zone, at the original's entry position for it (table 0xAAE0).
+; ------------------------------------------------------------------
+
+GW_TILE	= 602.		; gate window frame tiles  (original 0xEAB0)
+BF_TILE	= 672.		; bonus screen frame tiles (original 0xECE0)
+
+; ------------------------------------------------------------------
+; Once a frame, after the player has moved.  Z clear = the gate ran
+; (the caller restarts its loop: a zone load is pending and the
+; screen belongs to the bonus sequence).
+GATE_CHECK:	TST	GATEON
+		BEQ	8$
+		TST	PDEAD
+		BNE	8$
+		CMP	PX,GATEX
+		BLO	8$
+		CALL	GATE_RUN
+		MOV	#1,R0		; Z clear
+		RETURN
+8$:		CLR	R0		; Z set
+		RETURN
+
+; ------------------------------------------------------------------
+GATE_RUN:	CLR	GATEON
+		CALL	GW_DRAW		; the window over the zone
+
+		MOV	LIVES,R5	; LIVES BONUS: lives x 1000, scored
+		BEQ	20$		; at once (0xA83A)
+10$:		MOV	R5,-(SP)
+		MOV	#SC_1000,R3
+		CALL	SCORE_ADD
+		MOV	(SP)+,R5
+		SOB	R5,10$
+20$:		CALL	GATE_HUD
+
+		TST	PSUIT		; BRAVERY BONUS only without the
+		BNE	30$		; suit (0xA842): the 00000 becomes
+		MOV	#8.,R0		; 10000 and ticks up in eighty
+		MOV	#14.,R1		; steps of 125
+		MOV	#3,R2
+		MOV	#61,R4		; '1'
+		CALL	CELL_SET
+		MOV	#8.,R0
+		MOV	#14.,R1
+		MOV	#1,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#8.,R0
+		MOV	#14.,R1
+		MOV	#1,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
+		MOV	#80.,GTI
+31$:		MOV	#SC_125,R3
+		CALL	SCORE_ADD
+		CALL	GATE_HUD
+		MOV	#SFX_STEP,SND_REQ
+		CALL	VSYNC
+		DEC	GTI
+		BNE	31$
+
+30$:		MOV	#110.,R5	; let it be read (the original's
+		CALL	GATE_WAIT	; ~2.3 s of delay loops)
+
+		CMP	ZONE,#124.	; the last gate congratulates
+		BNE	40$		; first (0xA86E)
+		CALL	GC_DRAW
+		MOV	#200.,R5
+		CALL	GATE_WAIT
+
+40$:		CALL	GB_DRAW		; the bonus screen and its pointer
+		CALL	GB_POINTER
+
+		CMP	LIVES,#9.	; an extra life, at most nine
+		BHIS	50$		; (0xA89A)
+		INC	LIVES
+50$:		CLR	PSUIT		; suit off, everything refilled
+		MOV	#99.,AMMO
+		MOV	#10.,GRENADES
+		MOV	#1,HUDDIRTY
+
+		INC	ZONE		; the next level's first zone
+		CMP	ZONE,#125.
+		BLO	51$
+		CLR	ZONE
+51$:		CALL	GATE_ENTRY
+		CALL	PLAYER_INIT
+		MOV	#1,ZONELOAD
+		RETURN
+
+; where each level's first zone puts the player after a gate - the
+; original's table at 0xAAE0: {zone, x, y}
+GENT_TAB:	.BYTE	0,   16., 112.
+		.BYTE	25.,  0., 120.
+		.BYTE	50.,  0.,  32.
+		.BYTE	75., 40., 128.
+		.BYTE	100., 16., 112.
+		.BYTE	377, 0, 0
+		.EVEN
+
+GATE_ENTRY:	MOV	#GENT_TAB,R1
+1$:		MOVB	(R1)+,R0
+		BIC	#177400,R0
+		CMP	R0,#377
+		BEQ	9$
+		CMP	R0,ZONE
+		BEQ	2$
+		ADD	#2,R1
+		BR	1$
+2$:		MOVB	(R1)+,R0
+		BIC	#177400,R0
+		MOV	R0,PXENT
+		MOVB	(R1),R0
+		BIC	#177400,R0
+		MOV	R0,PYENT
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; push a changed score to the screen mid-sequence
+GATE_HUD:	CALL	HUD_UPD
+		CALL	BLIT_MARKS
+		RETURN
+
+; wait R5 frames
+GATE_WAIT:	CALL	VSYNC
+		SOB	R5,GATE_WAIT
+		RETURN
+
+; ------------------------------------------------------------------
+; The gate window (list 0xAAF2): a yellow-framed box over the zone,
+; rows 3..19, columns 7..25.  Its rows get their own palette - slot 1
+; yellow, slot 2 bright yellow, slot 3 the row's text ink.
+GW_PAL3:	.BYTE	15.,15.,15.,11.,15.,15.,15.,12.,15.
+		.BYTE	15.,15.,13.,15.,13.,15.,15.,15.
+		.EVEN
+
+GW_DRAW:	MOV	#3,GTROW	; the rows' palettes
+1$:		MOVB	#6.,ROWPAL3
+		MOVB	#14.,ROWPAL3+1
+		MOV	GTROW,R1
+		MOVB	GW_PAL3-3(R1),ROWPAL3+2
+		MOV	GTROW,R0
+		CALL	ROW_PALWORDS
+		MOV	GTROW,R0
+		MOVB	#3,WHITESL(R0)
+		INC	GTROW
+		CMP	GTROW,#20.
+		BLO	1$
+		MOV	#2,R0
+		CALL	SEND_PP_COMM
+
+		MOV	#3,R0		; the frame: a two-row border top
+		CALL	GW_HPAIR	; and bottom, tiled sides
+		MOV	#18.,R0
+		CALL	GW_HPAIR
+		MOV	#5,GTROW
+2$:		MOV	GTROW,R0
+		MOV	#7,R1
+		MOV	#2,R2
+		MOV	#GW_TILE+6.,R4
+		CALL	CELL_SET
+		MOV	GTROW,R0
+		MOV	#8.,R1
+		MOV	#1,R2
+		MOV	#GW_TILE+7.,R4
+		CALL	CELL_SET
+		MOV	GTROW,R0
+		MOV	#24.,R1
+		MOV	#2,R2
+		MOV	#GW_TILE+6.,R4
+		CALL	CELL_SET
+		MOV	GTROW,R0
+		MOV	#25.,R1
+		MOV	#1,R2
+		MOV	#GW_TILE+7.,R4
+		CALL	CELL_SET
+		MOV	#9.,GTI		; hollow inside
+3$:		MOV	GTROW,R0
+		MOV	GTI,R1
+		CLR	R2
+		CLR	R4
+		CALL	CELL_SET
+		INC	GTI
+		CMP	GTI,#24.
+		BLO	3$
+		INC	GTROW
+		CMP	GTROW,#18.
+		BLO	2$
+
+		MOV	#6,R0		; the window's text
+		MOV	#10.,R1
+		MOV	#3,R2
+		MOV	#S_BRAVERY,R3
+		CALL	PRINT_STR
+		MOV	#8.,R0
+		MOV	#14.,R1
+		MOV	#3,R2
+		MOV	#S_B00000,R3
+		CALL	PRINT_STR
+		MOV	#10.,R0
+		MOV	#11.,R1
+		MOV	#3,R2
+		MOV	#S_LIVESB,R3
+		CALL	PRINT_STR
+		MOV	LIVES,R4	; "n X 1000"
+		ADD	#60,R4
+		MOV	#12.,R0
+		MOV	#13.,R1
+		MOV	#2,R2
+		CALL	CELL_SET
+		MOV	#12.,R0
+		MOV	#15.,R1
+		MOV	#2,R2
+		MOV	#S_X1000,R3
+		CALL	PRINT_STR
+		MOV	#14.,R0
+		MOV	#10.,R1
+		MOV	#3,R2
+		MOV	#S_PRESSF,R3
+		CALL	PRINT_STR
+		MOV	#16.,R0
+		MOV	#11.,R1
+		MOV	#3,R2
+		MOV	#S_RESUME,R3
+		CALL	PRINT_STR
+
+		MOV	#3,R0		; expand and show the window
+		MOV	#7,R1
+		MOV	#19.,R2
+		MOV	#17.,R3
+		CALL	CELL_RECT
+		MOV	#3,R0
+		MOV	#7,R1
+		MOV	#19.,R2
+		MOV	#17.,R3
+		CALL	BLIT_RECT
+		RETURN
+
+; the border's two-row band starting at row R0: corner pair + filler
+GW_HPAIR:	MOV	R0,GTR2
+		MOV	#GW_TILE,GTT
+		MOV	#GW_TILE+4.,GTF
+		MOV	#2,GTSL
+		CALL	GW_ROW
+		INC	GTR2
+		MOV	#GW_TILE+2.,GTT
+		MOV	#GW_TILE+5.,GTF
+		MOV	#1,GTSL
+		CALL	GW_ROW
+		RETURN
+
+; one border row GTR2: tiles GTT, GTT+1 at both ends, GTF between
+GW_ROW:		MOV	GTR2,R0
+		MOV	#7,R1
+		MOV	#2,R2
+		MOV	GTT,R4
+		CALL	CELL_SET
+		MOV	GTR2,R0
+		MOV	#8.,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		INC	R4
+		CALL	CELL_SET
+		MOV	#9.,GTI
+1$:		MOV	GTR2,R0
+		MOV	GTI,R1
+		MOV	GTSL,R2
+		MOV	GTF,R4
+		CALL	CELL_SET
+		INC	GTI
+		CMP	GTI,#24.
+		BLO	1$
+		MOV	GTR2,R0
+		MOV	#24.,R1
+		MOV	#2,R2
+		MOV	GTT,R4
+		CALL	CELL_SET
+		MOV	GTR2,R0
+		MOV	#25.,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		INC	R4
+		CALL	CELL_SET
+		RETURN
+
+; ------------------------------------------------------------------
+; The full-screen frame both bonus screens share (lists 0xA961 /
+; 0xAA3F): cleared zone rows with the title palette, the cyan border,
+; the EXOLON logo at (3,8) converted to slots.
+GB_FRAME:	MOV	#CELLS,R0	; clear the zone rows
+		MOV	#PLAYROWS*NCOLS,R1
+1$:		CLR	(R0)+
+		CLR	(R0)+
+		SOB	R1,1$
+		CLR	GTROW		; title palette on every zone row
+2$:		MOVB	#13.,ROWPAL3
+		MOVB	#14.,ROWPAL3+1
+		MOVB	#15.,ROWPAL3+2
+		MOV	GTROW,R0
+		CALL	ROW_PALWORDS
+		MOV	GTROW,R0
+		MOVB	#3,WHITESL(R0)
+		INC	GTROW
+		CMP	GTROW,#PLAYROWS
+		BLO	2$
+		MOV	#2,R0
+		CALL	SEND_PP_COMM
+
+		CLR	R0		; top band: 2x2 corners, tiled runs
+		MOV	#BF_TILE,R4
+		MOV	#BF_TILE+8.,R5
+		CALL	GB_TROW
+		MOV	#1,R0
+		MOV	#BF_TILE+2.,R4
+		MOV	#BF_TILE+10.,R5
+		CALL	GB_TROW
+
+		MOV	#2,GTROW	; the sides, rows 2..21: two tile
+3$:		MOV	GTROW,R0	; pairs alternating down
+		BIT	#1,R0
+		BEQ	31$
+		MOV	#BF_TILE+6.,GTT
+		BR	32$
+31$:		MOV	#BF_TILE+4.,GTT
+32$:		CLR	R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		CALL	CELL_SET
+		MOV	GTROW,R0
+		MOV	#1,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		INC	R4
+		CALL	CELL_SET
+		MOV	GTROW,R0
+		MOV	#30.,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		CALL	CELL_SET
+		MOV	GTROW,R0
+		MOV	#31.,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		INC	R4
+		CALL	CELL_SET
+		INC	GTROW
+		CMP	GTROW,#PLAYROWS
+		BLO	3$
+
+		MOV	#L_LOGO,R0	; the EXOLON logo, as the title's
+		MOV	#3,R1
+		MOV	#8.,R2
+		CALL	RUN_LIST
+		MOVB	#13.,ROWPAL3	; its ink cells -> slots
+		MOVB	#14.,ROWPAL3+1
+		MOVB	#15.,ROWPAL3+2
+		CALL	INK_MAP
+		MOV	#PLAYROWS*NCOLS,R1
+		CALL	INKCELLS
+		RETURN
+
+; one top-band row R0: tiles R4, R4+1 in columns 0/1 and 30/31, the
+; pair R5, R5+1 repeated across columns 2..29 (all slot 1)
+GB_TROW:	MOV	R0,GTR2
+		MOV	R4,GTT
+		MOV	R5,GTF
+		CLR	R1
+		MOV	#1,R2
+		CALL	CELL_SET
+		MOV	GTR2,R0
+		MOV	#1,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		INC	R4
+		CALL	CELL_SET
+		MOV	#2,GTI
+1$:		MOV	GTR2,R0
+		MOV	GTI,R1
+		MOV	#1,R2
+		MOV	GTF,R4
+		BIT	#1,R1
+		BEQ	2$
+		INC	R4
+2$:		CALL	CELL_SET
+		INC	GTI
+		CMP	GTI,#30.
+		BLO	1$
+		MOV	GTR2,R0
+		MOV	#30.,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		CALL	CELL_SET
+		MOV	GTR2,R0
+		MOV	#31.,R1
+		MOV	#1,R2
+		MOV	GTT,R4
+		INC	R4
+		CALL	CELL_SET
+		RETURN
+
+; expand the zone rows and push the whole screen
+GB_SHOW:	CLR	R0
+		CLR	R1
+		MOV	#NCOLS,R2
+		MOV	#PLAYROWS,R3
+		CALL	CELL_RECT
+		CALL	BLIT_FULL
+		RETURN
+
+; ------------------------------------------------------------------
+; EXOLON BONUS SCREEN (list 0xA961): the ladder of eight prize rows.
+GBLAD:		.WORD	S_B00000, S_BZ1, S_B00000, S_BZ3
+		.WORD	S_B00000, S_BZ5, S_B00000, S_BZ7
+
+GB_DRAW:	CALL	GB_FRAME
+		MOV	#8.,R0
+		MOV	#6,R1
+		MOV	#3,R2
+		MOV	#S_BONTIT,R3
+		CALL	PRINT_STR
+		MOV	#10.,R0
+		MOV	#3,R1
+		MOV	#1,R2
+		MOV	#S_BONPTR,R3
+		CALL	PRINT_STR
+		CLR	GTI		; the ladder, inks alternating
+1$:		MOV	GTI,R0
+		ASL	R0
+		MOV	GBLAD(R0),R3
+		MOV	#2,R2		; even rows bright yellow,
+		BIT	#1,GTI		; odd rows bright cyan
+		BEQ	2$
+		MOV	#1,R2
+2$:		MOV	R2,-(SP)
+		MOV	GTI,R0
+		ADD	#13.,R0
+		MOV	#9.,R1
+		CALL	PRINT_STR
+		MOV	GTI,R0
+		ADD	#13.,R0
+		MOV	#15.,R1
+		MOV	(SP)+,R2
+		MOV	#S_POINTS,R3
+		CALL	PRINT_STR
+		INC	GTI
+		CMP	GTI,#8.
+		BLO	1$
+		CALL	GB_SHOW
+		RETURN
+
+; ------------------------------------------------------------------
+; The pointer: a '*' sweeps rows 13..20 in column 22, a step every
+; second frame, until ФИКС/space stops it; a stop on an odd row pays
+; its 1000/3000/5000/7000 (0xA908..0xA95F).
+GB_POINTER:	CALL	VSYNC		; fire must be seen up first
+		CALL	INPUT_READ
+		TST	KEYS
+		BNE	GB_POINTER
+		CLR	GTROW
+1$:		CALL	VSYNC
+		CALL	INPUT_READ
+		INC	GTROW
+		BIT	#1,GTROW
+		BNE	2$
+		CALL	GB_STEP
+2$:		MOV	#K_FIRE,R0
+		CALL	KEY_EDGE
+		BEQ	1$
+		MOV	#50.,R5		; the original's pause before the
+		CALL	GATE_WAIT	; verdict
+		MOV	GATEPTR,R0
+		BIT	#1,R0
+		BEQ	9$		; an even row pays nothing
+		BIC	#177770,R0
+		MOV	R0,GTI
+3$:		MOV	#SC_1000,R3
+		CALL	SCORE_ADD
+		DEC	GTI
+		BNE	3$
+		CALL	GATE_HUD
+		MOV	#SFX_PICK,SND_REQ
+9$:		RETURN
+
+GB_STEP:	MOV	GATEPTR,R0	; blank the old position
+		BIC	#177770,R0
+		ADD	#13.,R0
+		MOV	#22.,R1
+		CLR	R2
+		CLR	R4
+		CALL	CELL_SET
+		INC	GATEPTR
+		MOV	GATEPTR,R0	; the new one
+		BIC	#177770,R0
+		ADD	#13.,R0
+		MOV	#22.,R1
+		MOV	#3,R2
+		MOV	#52,R4		; '*'
+		CALL	CELL_SET
+		MOV	#13.,R0		; push the whole column
+		MOV	#22.,R1
+		MOV	#1,R2
+		MOV	#8.,R3
+		CALL	CELL_RECT
+		MOV	#13.,R0
+		MOV	#22.,R1
+		MOV	#1,R2
+		MOV	#8.,R3
+		CALL	BLIT_RECT
+		RETURN
+
+; ------------------------------------------------------------------
+; CONGRATULATIONS (list 0xAA3F), after the last gate.
+GC_DRAW:	CALL	GB_FRAME
+		MOV	#8.,R0
+		MOV	#8.,R1
+		MOV	#2,R2
+		MOV	#S_CONGR1,R3
+		CALL	PRINT_STR
+		MOV	#10.,R0
+		MOV	#6,R1
+		MOV	#1,R2
+		MOV	#S_CONGR2,R3
+		CALL	PRINT_STR
+		MOV	#12.,R0
+		MOV	#8.,R1
+		MOV	#3,R2
+		MOV	#S_CONGR3,R3
+		CALL	PRINT_STR
+		MOV	#14.,R0
+		MOV	#10.,R1
+		MOV	#3,R2
+		MOV	#S_CONGR4,R3
+		CALL	PRINT_STR
+		MOV	#17.,R0
+		MOV	#9.,R1
+		MOV	#1,R2
+		MOV	#S_PRESSF,R3
+		CALL	PRINT_STR
+		MOV	#19.,R0
+		MOV	#10.,R1
+		MOV	#1,R2
+		MOV	#S_RESUME,R3
+		CALL	PRINT_STR
+		CALL	GB_SHOW
+		RETURN
+
+; the bonus amounts, SCORE_ADD style
+SC_ZERO:	.ASCII	/000000/
+SC_1000:	.ASCII	/001000/
+SC_125:		.ASCII	/000125/
+		.EVEN

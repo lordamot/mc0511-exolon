@@ -32,6 +32,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+# an unhandled exception should land in the terminal, not in Ubuntu's
+# apport crash-report dialog (apport installs a system-wide excepthook)
+sys.excepthook = sys.__excepthook__
+
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EMU = REPO_ROOT / "bin/ukncbtl/uknc-headless"
 ROM = REPO_ROOT / "bin/ukncbtl/uknc_rom.bin"

@@ -20,8 +20,10 @@ MAIN_START:	MOV	#STACK_TOP,SP
 		CLR	LERASE		; list state is uninitialised RAM
 		CLR	BENCHF
 		CALL	MARKS_CLEAR
-		CALL	REV_INIT	; byte -> reversed bits, for facing left
 		CALL	PP_MAIN_LOAD	; PPU: line table, colours, sound
+		CALL	REV_INIT	; byte -> reversed bits, for facing
+					; left - built into the CPU-side PPU
+					; block, dead once the load is done
 
 MAIN_CYCLE:	CALL	MENU
 		CALL	GAME_RUN
