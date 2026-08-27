@@ -1,0 +1,1104 @@
+; ------------------------------------------------------------------
+; The runtime scenery animations and the swooping flyers - the part of
+; the original the first port pass left out (see re-notes.md):
+;
+;   class 2   jet flames under the hovering platforms, the spaceship
+;             and the pods: two tiles below the anchor cycle through
+;             three flame pairs in a random ink (0x8F5A)
+;   class 4   booth and gantry frames flash a new colour every frame
+;             (0x9118) - the teleport booths' animation
+;   class 5   land mines: armed they sit still; stepped on they blow
+;             the player up (the power suit walks over them) and burn
+;             for the rest of the visit (0x9152)
+;   class 10  the pump that rises out of the floor, holds, and sinks
+;             back, drawn from player-bank frame 24 (0x9C15); touching
+;             it while it cycles is fatal, suit excepted
+;   class 15  a flickering energy arc between a pair of pylons, two
+;             16x16 frames wide (0xA7D6) - scenery, not a hazard
+;   class 17  the vertical laser beam under a hovering platform: it
+;             reaches the ground, cycles its colour, kills on touch
+;             and takes BEAM_HITS laser bolts to cut down (0xABCF)
+;
+; and the flyers (0xA553 / 0xA360): swarms that enter on the right and
+; fly a per-zone byte-coded path as a four-frame animation - the
+; spheres, saucers and spinners that make 70 of the zones dangerous.
+; ------------------------------------------------------------------
+
+; ------------------------------------------------------------------
+; Zone load: collect the animated cells (the classes the map keeps),
+; consume the anim hooks the display lists filed (opcode 0353), and
+; look this zone up in the flyer table.
+ANIMS_INIT:	CLR	NFLM
+		CLR	NCYC
+		CLR	NMIN5
+		CLR	NPUMPS
+		CLR	BEAMON
+		CLR	BEAMPH
+		CLR	FLYON
+		CLR	FLYCD
+		CLR	FLMPH
+		CLR	CYCPH
+		MOV	#FLYS,R0
+		MOV	#F.SIZE*NFLY,R1
+1$:		CLRB	(R0)+
+		SOB	R1,1$
+
+		CLR	R4			; scan the finished map
+10$:		CLR	R3
+11$:		MOV	R4,R0
+		MOV	R3,R1
+		CALL	CELLADDR
+		MOVB	C.SOLID(R2),R0
+		BIC	#177400,R0
+		CMP	R0,#CL_ANIM2
+		BNE	12$
+		CMP	NFLM,#NFLAME
+		BHIS	19$
+		MOV	NFLM,R2
+		ASL	R2
+		MOV	R4,FLMROW(R2)
+		MOV	R3,FLMCOL(R2)
+		INC	NFLM
+		BR	19$
+12$:		CMP	R0,#CL_BOOTH
+		BNE	13$
+		MOV	NCYC,R2		; extend the last run when this cell
+		BEQ	121$		; continues it (the scan goes left to
+		DEC	R2		; right along each row)
+		MOVB	CYCROW(R2),R0
+		BIC	#177400,R0
+		CMP	R0,R4
+		BNE	121$
+		MOVB	CYCCOL(R2),R0
+		BIC	#177400,R0
+		MOVB	CYCLEN(R2),R1
+		BIC	#177400,R1
+		ADD	R1,R0
+		CMP	R0,R3
+		BNE	121$
+		INCB	CYCLEN(R2)
+		BR	19$
+121$:		CMP	NCYC,#NCYC4
+		BHIS	19$
+		MOV	NCYC,R2
+		MOVB	R4,CYCROW(R2)
+		MOVB	R3,CYCCOL(R2)
+		MOVB	#1,CYCLEN(R2)
+		INC	NCYC
+		BR	19$
+13$:		CMP	R0,#CL_MINE5
+		BNE	14$
+		CMP	NMIN5,#NMINE5
+		BHIS	19$
+		MOV	NMIN5,R2
+		MOVB	R4,MINROW(R2)
+		MOVB	R3,MINCOL(R2)
+		MOVB	#1,MINST(R2)		; armed
+		INC	NMIN5
+		BR	19$
+14$:		CMP	R0,#CL_BEAM
+		BNE	19$
+		TST	BEAMON			; one beam per zone, as the
+		BNE	19$			; original's single slot
+		MOV	R4,BEAMROW
+		MOV	R3,BEAMCOL
+		MOV	#-1,BEAMON		; found; armed by BEAM_SETUP
+19$:		INC	R3
+		CMP	R3,#NCOLS
+		BLO	11$
+		INC	R4
+		CMP	R4,#PLAYROWS
+		BLO	10$
+		CALL	BEAM_SETUP
+
+		MOV	HOOKN,R5		; the hook cells
+		BEQ	30$
+		MOV	#HOOKS,R4
+20$:		MOVB	(R4)+,R0		; class
+		BIC	#177400,R0
+		MOVB	(R4)+,R1		; row
+		BIC	#177400,R1
+		MOVB	(R4)+,R2		; col
+		BIC	#177400,R2
+		CMP	R1,#PLAYROWS		; off-screen anchors drop, as
+		BHIS	29$			; the plotter drops their cells
+		CMP	R2,#NCOLS
+		BHIS	29$
+		CMP	R0,#CL_FIELD		; free energy balls (obj 39)
+		BNE	21$
+		MOV	R5,-(SP)
+		MOV	R4,-(SP)
+		MOV	R1,R0
+		MOV	R2,R1
+		CALL	BALL_EMIT
+		MOV	(SP)+,R4
+		MOV	(SP)+,R5
+		BR	29$
+21$:		CMP	R0,#CL_PUMP
+		BNE	22$
+		CMP	NPUMPS,#NPUMP
+		BHIS	29$
+		MOV	NPUMPS,R0
+		MOVB	R2,PMPCOL(R0)
+		MOVB	R1,PMPROW(R0)
+		MOVB	R1,PMPCUR(R0)
+		MOVB	#95.,PMPCNT(R0)		; the original loads 0x5F
+		INC	NPUMPS
+		BR	29$
+22$:		CMP	R0,#CL_ARC
+		BNE	29$
+		MOV	R5,-(SP)
+		MOV	R4,-(SP)
+		ASL	R2
+		ASL	R2			; x = col*4
+		ASL	R1
+		ASL	R1
+		ASL	R1			; y = row*8
+		MOV	R2,-(SP)
+		MOV	R1,R2
+		MOV	(SP)+,R1
+		CLR	R4
+		MOV	#EK_ARC,R0
+		CALL	ENT_SPAWN
+		MOV	(SP)+,R4
+		MOV	(SP)+,R5
+29$:		DEC	R5
+		BNE	20$
+
+30$:		MOV	#FLYCFG,R1		; this zone's flyers, if any
+31$:		MOVB	(R1)+,R0
+		BIC	#177400,R0
+		CMP	R0,#377
+		BEQ	39$
+		CMP	R0,ZONE
+		BEQ	32$
+		ADD	#2,R1
+		BR	31$
+32$:		MOVB	(R1)+,R0		; frames between spawns
+		BIC	#177400,R0
+		MOV	R0,FLYCDV
+		MOVB	(R1)+,R0		; frame set * 8 + path id
+		BIC	#177400,R0
+		MOV	R0,R1
+		BIC	#177770,R1		; path id
+		ASL	R1
+		MOV	FLYPATHS(R1),FLYPATH
+		ASR	R0
+		ASR	R0
+		ASR	R0			; frame set
+		MOVB	FLYFRBT(R0),R0
+		BIC	#177400,R0
+		MOV	R0,FLYFRB
+		MOV	#1,FLYON
+39$:		RETURN
+
+; ------------------------------------------------------------------
+; The per-frame animations that live in the cell buffer.
+ANIMS_UPD:	CALL	FLAMES_UPD
+		CALL	CYC_UPD
+		CALL	MINES_UPD
+		CALL	BEAM_UPD
+		RETURN
+
+; ---- class 2: the jet flames -------------------------------------
+; 0x8F5A: a three-step counter shared by every flame, two tiles drawn
+; below the anchor, and a fresh random bright ink every frame.  Here
+; the ink is a random palette slot of the row.
+FLAMES_UPD:	TST	NFLM
+		BEQ	9$
+		INC	FLMPH
+		CMP	FLMPH,#3
+		BLO	1$
+		CLR	FLMPH
+1$:		CLR	FLMI
+2$:		MOV	FLMI,R0
+		ASL	R0
+		MOV	FLMROW(R0),R4
+		MOV	FLMCOL(R0),R3
+		MOV	FLMPH,R5
+		ASL	R5
+		ADD	#FLAME_T,R5		; upper tile of the pair
+		INC	R4
+		CALL	FLM_CELL
+		INC	R4
+		INC	R5
+		CALL	FLM_CELL
+		MOV	FLMI,R0
+		ASL	R0
+		MOV	FLMROW(R0),R0
+		INC	R0
+		MOV	FLMI,R1
+		ASL	R1
+		MOV	FLMCOL(R1),R1
+		MOV	#1,R2
+		MOV	#2,R3
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		CALL	CELL_RECT
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	#1,R2
+		MOV	#2,R3
+		CALL	MARK_RECT
+		INC	FLMI
+		CMP	FLMI,NFLM
+		BLO	2$
+9$:		RETURN
+
+; one flame cell: tile R5 at (R4 = row, R3 = col), random slot, class
+; kept.  Preserves R3, R4, R5.
+FLM_CELL:	CMP	R4,#PLAYROWS
+		BHIS	9$
+		CMP	R3,#NCOLS
+		BHIS	9$
+		MOV	R4,R0
+		MOV	R3,R1
+		MOV	R3,-(SP)
+		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+		CALL	CELLADDR
+		MOV	(SP),@R2
+		CALL	RANDOM
+		BIC	#177774,R0
+		BNE	1$
+		MOV	#3,R0
+1$:		MOVB	R0,C.SLOT(R2)
+		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+		MOV	(SP)+,R3
+9$:		RETURN
+
+; ---- class 4: the colour-cycled booth frames ---------------------
+; 0x9118 rewrites the attribute of every class-4 cell from the frame
+; counter, which is what makes the teleport booths shimmer.  Here the
+; cells step through the row's three palette slots together.
+CYC_UPD:	TST	NCYC
+		BEQ	9$
+		INC	CYCPH
+		CMP	CYCPH,#3
+		BLO	1$
+		CLR	CYCPH
+1$:		CLR	CYCI
+2$:		MOV	CYCI,R3
+		MOVB	CYCROW(R3),R0
+		BIC	#177400,R0
+		MOVB	CYCCOL(R3),R1
+		BIC	#177400,R1
+		MOVB	CYCLEN(R3),R5
+		BIC	#177400,R5
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R5,-(SP)
+		CALL	CELLADDR
+		MOV	CYCPH,R0
+		INC	R0
+3$:		MOVB	R0,C.SLOT(R2)
+		ADD	#C.SIZE,R2
+		SOB	R5,3$
+		MOV	4(SP),R0
+		MOV	2(SP),R1
+		MOV	@SP,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	4(SP),R0
+		MOV	2(SP),R1
+		MOV	@SP,R2
+		MOV	#1,R3
+		CALL	MARK_RECT
+		CMP	(SP)+,(SP)+
+		TST	(SP)+
+		INC	CYCI
+		CMP	CYCI,NCYC
+		BLO	2$
+9$:		RETURN
+
+; ---- class 5: the land mines -------------------------------------
+; 0x9152 / 0x9186: an armed mine goes off when the player's feet are on
+; its own top line and he stands over it; the power suit walks across
+; unharmed (0x9CAA).  A blown mine burns for the rest of the visit -
+; its two cells flicker through the burning pair in a random ink.
+MINES_UPD:	TST	NMIN5
+		BEQ	9$
+		CLR	MINI
+1$:		MOV	MINI,R2
+		MOVB	MINST(R2),R0
+		BEQ	5$			; blown: burn
+		TST	PDEAD
+		BNE	8$
+		MOVB	MINROW(R2),R0		; armed: underfoot?
+		BIC	#177400,R0
+		ASL	R0
+		ASL	R0
+		ASL	R0
+		MOV	PY,R1
+		ADD	#PL_H,R1		; feet on the mine's top line
+		CMP	R1,R0
+		BNE	8$
+		MOVB	MINCOL(R2),R0
+		BIC	#177400,R0
+		ASL	R0
+		ASL	R0
+		MOV	PX,R1
+		SUB	R0,R1			; and x within [-7, +2] of it
+		CMP	R1,#-7
+		BLT	8$
+		CMP	R1,#2
+		BGT	8$
+		CLRB	MINST(R2)		; it goes off
+		MOV	#SFX_BOOM,SND_REQ
+		MOVB	MINCOL(R2),R1
+		BIC	#177400,R1
+		ASL	R1
+		ASL	R1
+		SUB	#2,R1
+		BGE	2$
+		CLR	R1
+2$:		MOVB	MINROW(R2),R2
+		BIC	#177400,R2
+		ASL	R2
+		ASL	R2
+		ASL	R2
+		SUB	#8.,R2
+		BGE	3$
+		CLR	R2
+3$:		MOV	#EK_BOOM,R0
+		CLR	R4
+		CALL	ENT_SPAWN
+		CALL	PLAYER_KILLNS
+		BR	8$
+5$:		MOV	TICK,R5			; burning remains flicker
+		BIC	#177776,R5
+		ASL	R5
+		ADD	#MBLINK_T,R5
+		MOVB	MINROW(R2),R4
+		BIC	#177400,R4
+		MOVB	MINCOL(R2),R3
+		BIC	#177400,R3
+		CALL	FLM_CELL		; over both of its cells
+		INC	R3
+		INC	R5
+		CALL	FLM_CELL
+		MOV	R4,R0
+		MOV	R3,R1
+		DEC	R1
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	#2,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	#2,R2
+		MOV	#1,R3
+		CALL	MARK_RECT
+8$:		INC	MINI
+		CMP	MINI,NMIN5
+		BLO	1$
+9$:		RETURN
+
+; ---- class 17: the vertical laser beam ---------------------------
+; 0xAB94 draws it from under the platform down to the first solid cell;
+; 0xABCF recolours the whole column every frame and kills the player
+; whose body reaches its column; 0xAC04 counts the laser bolts flying
+; through and fells it at BEAM_HITS, which scores.
+BEAM_SETUP:	TST	BEAMON
+		BEQ	9$
+		CLR	BEAMON
+		CLR	BEAMLEN
+		CLR	BEAMHIT
+		INC	BEAMROW			; first beam cell
+		MOV	#BEAMSAVE,R5
+1$:		MOV	BEAMROW,R0
+		ADD	BEAMLEN,R0
+		CMP	R0,#PLAYROWS
+		BHIS	8$
+		MOV	BEAMCOL,R1
+		CALL	MAP_BLOCK		; down to the ground
+		BNE	8$
+		MOV	BEAMROW,R0
+		ADD	BEAMLEN,R0
+		MOV	BEAMCOL,R1
+		CALL	CELLADDR
+		MOV	@R2,(R5)+		; keep what the beam covers
+		MOV	C.SLOT(R2),(R5)+
+		MOV	#BEAM_T,@R2
+		MOVB	#3,C.SLOT(R2)
+		INC	BEAMLEN
+		BR	1$
+8$:		TST	BEAMLEN
+		BEQ	9$
+		MOV	#1,BEAMON
+9$:		RETURN
+
+BEAM_UPD:	TST	BEAMON
+		BLE	9$
+		INC	BEAMPH
+		CMP	BEAMPH,#3
+		BLO	1$
+		CLR	BEAMPH
+1$:		MOV	BEAMROW,R4
+		MOV	BEAMLEN,R5
+2$:		MOV	R4,R0
+		MOV	BEAMCOL,R1
+		CALL	CELLADDR
+		MOV	BEAMPH,R0
+		INC	R0
+		MOVB	R0,C.SLOT(R2)
+		INC	R4
+		SOB	R5,2$
+		MOV	BEAMROW,R0
+		MOV	BEAMCOL,R1
+		MOV	#1,R2
+		MOV	BEAMLEN,R3
+		CALL	CELL_RECT
+		MOV	BEAMROW,R0
+		MOV	BEAMCOL,R1
+		MOV	#1,R2
+		MOV	BEAMLEN,R3
+		CALL	MARK_RECT
+		TST	PDEAD
+		BNE	9$
+		MOV	BEAMCOL,R0		; the touch that kills: the
+		ASL	R0			; original's 0xABF3 exactly
+		ASL	R0
+		MOV	PX,R1
+		ADD	#12.,R1
+		CMP	R1,R0
+		BNE	9$
+		CALL	PLAYER_KILL
+9$:		RETURN
+
+; A laser bolt passes the cell column just left of the beam (0xAC04).
+; R5 = the bolt; preserves it.
+BOLT_BEAM:	TST	BEAMON
+		BLE	9$
+		MOV	BEAMCOL,R0
+		ASL	R0
+		ASL	R0
+		SUB	#4,R0
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		CMP	R1,R0
+		BNE	9$
+		INC	BEAMHIT
+		CMP	BEAMHIT,#BEAM_HITS
+		BLO	9$
+		CALL	BEAM_CUT
+		MOV	ECUR,R5
+9$:		RETURN
+
+; the beam falls: put the covered cells back, score it, and free it
+BEAM_CUT:	MOV	#-1,BEAMON
+		MOV	BEAMROW,R4
+		MOV	BEAMLEN,R3
+		MOV	#BEAMSAVE,R5
+1$:		MOV	R4,R0
+		MOV	BEAMCOL,R1
+		MOV	R3,-(SP)
+		MOV	R5,-(SP)
+		CALL	CELLADDR
+		MOV	(SP)+,R5
+		MOV	(SP)+,R3
+		MOV	(R5)+,@R2
+		MOV	(R5)+,C.SLOT(R2)
+		INC	R4
+		SOB	R3,1$
+		MOV	BEAMROW,R0
+		MOV	BEAMCOL,R1
+		MOV	#1,R2
+		MOV	BEAMLEN,R3
+		CALL	CELL_RECT
+		MOV	BEAMROW,R0
+		MOV	BEAMCOL,R1
+		MOV	#1,R2
+		MOV	BEAMLEN,R3
+		CALL	MARK_RECT
+		MOV	#SFX_BOOM,SND_REQ
+		MOV	#SC_BEAM,R3
+		CALL	SCORE_ADD
+		RETURN
+
+SC_BEAM:	.ASCII	/000200/
+		.EVEN
+
+; ---- class 15: the pylon arc -------------------------------------
+; 0xA7D6: two 16x16 frames side by side, a random frame of the four
+; and its neighbour, redrawn every frame - pure scenery.  It lives in
+; the entity list (kind EK_ARC), so erase and reload come for free.
+EN_ARC:		CALL	RANDOM
+		BIC	#177774,R0
+		ADD	#ARC_FR,R0
+		MOV	R0,ARCF
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		MOV	R1,ARCX
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		MOV	R2,ARCY
+		MOV	#16.,SPRH
+		CLR	SPRC
+		CLR	SPRMIR
+		MOV	ARCF,R0
+		CALL	SPR_SMALL
+		MOV	#16.,SPRH
+		CLR	SPRC
+		MOV	ARCF,R0
+		INC	R0
+		MOV	ARCX,R1
+		ADD	#8.,R1
+		MOV	ARCY,R2
+		CALL	SPR_SMALL
+		MOV	ECUR,R5
+		CALL	ENT_RECT
+		CALL	MARK_RECT
+		RETURN
+
+; ---- class 10: the rising pumps ----------------------------------
+; 0x9C15: each pump runs a counter; below PUMP_LO it rests on its
+; anchor, then four frames up, eleven held, four down, and the counter
+; rerolls.  It is drawn from player-bank frame 24 and, while cycling,
+; kills whoever it touches - except the power suit (0x9CAA).
+PUMPS_ERASE:	TST	NPUMPS
+		BEQ	9$
+		CLR	PMPI
+1$:		MOV	PMPI,R2
+		MOVB	PMPCUR(R2),R0
+		BIC	#177400,R0
+		MOVB	PMPCOL(R2),R1
+		BIC	#177400,R1
+		MOV	#3,R2
+		MOV	#4,R3
+		CALL	MARK_RECT
+		TST	R4
+		BEQ	2$
+		CALL	CELL_RECT
+2$:		INC	PMPI
+		CMP	PMPI,NPUMPS
+		BLO	1$
+9$:		RETURN
+
+PUMPS_UPD:	TST	NPUMPS
+		BEQ	9$
+		CLR	PMPI
+1$:		MOV	PMPI,R2
+		MOVB	PMPCNT(R2),R0
+		BIC	#177400,R0
+		INC	R0
+		MOVB	R0,PMPCNT(R2)
+		CMP	R0,#PUMP_LO
+		BLO	5$			; resting on the anchor
+		CMP	R0,#PUMP_UP
+		BHIS	2$
+		DECB	PMPCUR(R2)		; four frames up
+		BR	4$
+2$:		CMP	R0,#PUMP_DN
+		BLO	4$			; held up
+		CMP	R0,#PUMP_END
+		BHIS	3$
+		INCB	PMPCUR(R2)		; four frames down
+		BR	4$
+3$:		CALL	RANDOM			; back at rest: reroll
+		BIC	#177700,R0
+		ADD	#20.,R0
+		MOV	PMPI,R2
+		MOVB	R0,PMPCNT(R2)
+		BR	5$
+4$:		CALL	PUMP_TOUCH		; fatal while it cycles
+5$:		MOV	PMPI,R2
+		MOVB	PMPCUR(R2),R0
+		BIC	#177400,R0
+		ASL	R0
+		ASL	R0
+		ASL	R0
+		MOV	R0,R2
+		MOV	PMPI,R0
+		MOVB	PMPCOL(R0),R1
+		BIC	#177400,R1
+		ASL	R1
+		ASL	R1
+		CLR	SPRMIR
+		MOV	#PUMP_FR,R0
+		CALL	SPR_PLAYER
+		MOV	PMPI,R2
+		MOVB	PMPCUR(R2),R0
+		BIC	#177400,R0
+		MOVB	PMPCOL(R2),R1
+		BIC	#177400,R1
+		MOV	#3,R2
+		MOV	#4,R3
+		CALL	MARK_RECT
+		INC	PMPI
+		CMP	PMPI,NPUMPS
+		BLO	1$
+9$:		RETURN
+
+; the pump at PMPI against the player: a 12-unit by 32-line box
+PUMP_TOUCH:	TST	PDEAD
+		BNE	9$
+		MOV	PMPI,R2
+		MOVB	PMPCOL(R2),R0
+		BIC	#177400,R0
+		ASL	R0
+		ASL	R0			; pump x0
+		MOV	PX,R1
+		ADD	#11.,R1
+		CMP	R1,R0			; player x1 >= pump x0
+		BLT	9$
+		ADD	#11.,R0			; pump x1
+		CMP	PX,R0
+		BGT	9$
+		MOVB	PMPCUR(R2),R0
+		BIC	#177400,R0
+		ASL	R0
+		ASL	R0
+		ASL	R0			; pump y0
+		MOV	PY,R1
+		ADD	#PL_FOOT,R1
+		CMP	R1,R0			; player y1 >= pump y0
+		BLT	9$
+		ADD	#31.,R0			; pump y1
+		MOV	PY,R1
+		TST	PDUCK
+		BEQ	1$
+		ADD	#PL_DUCKTOP,R1
+1$:		CMP	R1,R0
+		BGT	9$
+		CALL	PLAYER_KILLNS
+9$:		RETURN
+
+; ------------------------------------------------------------------
+; The flyers.  Six slots as the original's list at 0xA508; each record
+; is {state, x, y, phase, repeat, path pointer} and flies the zone's
+; byte-coded path: pairs of {dx, dy}, 0304 n = repeat the next pair n
+; times, 0303 = back to the start.
+FLY_SPAWN:	TST	FLYON
+		BEQ	9$
+		TST	PDEAD
+		BNE	9$
+		TST	FLYCD
+		BEQ	1$
+		DEC	FLYCD
+		RETURN
+1$:		CMP	PX,#FLY_NEAR		; only at a player still
+		BHIS	9$			; working his way in
+		MOV	#FLYS,R3		; a free slot
+		MOV	#NFLY,R2
+2$:		TSTB	F.ST(R3)
+		BEQ	3$
+		ADD	#F.SIZE,R3
+		SOB	R2,2$
+		RETURN
+3$:		CALL	RANDOM			; the original's odds
+		CMP	R0,#FLY_ROLL
+		BLO	9$
+		MOVB	#1,F.ST(R3)
+		MOVB	#120.,F.X(R3)
+		CALL	RANDOM
+		CMP	R0,#175.
+		BLO	4$
+		MOV	PY,R1			; now and then above the player
+		SUB	#10.,R1
+		BR	5$
+4$:		CALL	RANDOM			; usually just below his line
+		BIC	#177760,R0
+		MOV	PY,R1
+		ADD	R0,R1
+5$:		TST	R1
+		BGE	6$
+		CLR	R1
+6$:		CMP	R1,#175.
+		BLOS	7$
+		MOV	#175.,R1
+7$:		MOVB	R1,F.Y(R3)
+		MOVB	#3,F.PH(R3)
+		CLRB	F.REP(R3)
+		MOV	FLYPATH,F.PTR(R3)
+		MOV	FLYCDV,FLYCD
+9$:		RETURN
+
+; restore the background under every flyer before the updates
+FLY_ERASE:	TST	FLYON
+		BEQ	9$
+		MOV	#FLYS,R5
+		MOV	#NFLY,R4
+1$:		TSTB	F.ST(R5)
+		BEQ	2$
+		MOV	R4,-(SP)
+		MOV	R5,-(SP)
+		MOVB	F.Y(R5),R0
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	F.X(R5),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		MOV	#3,R2
+		MOV	#3,R3
+		CALL	MARK_RECT
+		TST	R4
+		BEQ	3$
+		CALL	CELL_RECT
+3$:		MOV	(SP)+,R5
+		MOV	(SP)+,R4
+2$:		ADD	#F.SIZE,R5
+		SOB	R4,1$
+9$:		RETURN
+
+FLY_UPD:	TST	FLYON
+		BEQ	9$
+		CLR	FLYI
+1$:		MOV	FLYI,R3
+		ASL	R3
+		ASL	R3
+		ASL	R3
+		ADD	#FLYS,R3
+		TSTB	F.ST(R3)
+		BEQ	8$
+		CALL	FLY_STEP		; -> R1 = dx, R2 = dy
+		MOVB	F.X(R3),R0
+		BIC	#177400,R0
+		ADD	R1,R0
+		BLT	7$			; off either side
+		CMP	R0,#128.
+		BHIS	7$
+		MOVB	R0,F.X(R3)
+		MOVB	F.Y(R3),R0
+		BIC	#177400,R0
+		ADD	R2,R0
+		BLT	7$			; off the top or the ground
+		CMP	R0,#176.
+		BHIS	7$
+		MOVB	R0,F.Y(R3)
+		INCB	F.PH(R3)
+		CALL	FLY_HITPL		; fatal to the touch
+		TSTB	F.ST(R3)
+		BEQ	8$
+		MOVB	F.PH(R3),R0		; four-frame animation
+		BIC	#177774,R0
+		ADD	FLYFRB,R0
+		MOVB	F.X(R3),R1
+		BIC	#177400,R1
+		MOVB	F.Y(R3),R2
+		BIC	#177400,R2
+		MOV	R3,-(SP)
+		MOV	#16.,SPRH
+		CLR	SPRC
+		CLR	SPRMIR
+		CALL	SPR_SMALL
+		MOV	(SP)+,R3
+		MOVB	F.Y(R3),R0
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	F.X(R3),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		MOV	#3,R2
+		MOV	#3,R3
+		CALL	MARK_RECT
+		BR	8$
+7$:		CLRB	F.ST(R3)		; gone (the erase pass already
+						; put the background back)
+8$:		INC	FLYI
+		CMP	FLYI,#NFLY
+		BLO	1$
+9$:		RETURN
+
+; one step of the path at R3's pointer -> R1 = dx, R2 = dy (signed).
+; The repeat handling is the original's 0xA380..0xA3B6, quirks and all.
+FLY_STEP:	TSTB	F.REP(R3)
+		BEQ	1$
+		DECB	F.REP(R3)
+		MOV	F.PTR(R3),R0		; stay on the same pair
+		MOVB	(R0)+,R1
+		MOVB	(R0),R2
+		RETURN
+1$:		MOV	F.PTR(R3),R0
+2$:		CMPB	(R0),#P_LOOP
+		BNE	3$
+		MOV	FLYPATH,R0		; back to the start
+		BR	2$
+3$:		CMPB	(R0),#P_REP
+		BNE	4$
+		MOVB	1(R0),R2
+		BIC	#177400,R2
+		SUB	#2,R2			; the original applies the
+		BGE	31$			; pair n times in all
+		CLR	R2
+31$:		MOVB	R2,F.REP(R3)
+		ADD	#2,R0
+		MOV	R0,F.PTR(R3)
+		MOVB	(R0)+,R1
+		MOVB	(R0),R2
+		RETURN
+4$:		MOVB	(R0)+,R1		; a plain pair
+		MOVB	(R0)+,R2
+		MOV	R0,F.PTR(R3)
+		RETURN
+
+; the flyer at R3 against the player: the original's 4-by-8 box around
+; its middle (0xA5F4).  Preserves R3.
+FLY_HITPL:	TST	PDEAD
+		BNE	9$
+		MOVB	F.X(R3),R0
+		BIC	#177400,R0
+		ADD	#2,R0			; box x0
+		MOV	PX,R1
+		ADD	#10.,R1
+		CMP	R0,R1			; box x0 <= player x1
+		BGT	9$
+		ADD	#3,R0			; box x1
+		MOV	PX,R1
+		INC	R1
+		CMP	R0,R1			; box x1 >= player x0
+		BLT	9$
+		MOVB	F.Y(R3),R0
+		BIC	#177400,R0
+		ADD	#4,R0			; box y0
+		MOV	PY,R1
+		ADD	#PL_FOOT,R1
+		CMP	R0,R1
+		BGT	9$
+		ADD	#7,R0			; box y1
+		MOV	PY,R1
+		INC	R1
+		TST	PDUCK
+		BEQ	1$
+		ADD	#PL_DUCKTOP-1,R1
+1$:		CMP	R0,R1
+		BLT	9$
+		MOV	R3,-(SP)		; it bursts on him
+		CALL	FLY_BOOM
+		MOV	(SP)+,R3
+		CALL	PLAYER_KILL
+9$:		RETURN
+
+; the flyer at R3 explodes: its cells are put back and an explosion
+; entity takes over.  Clobbers everything but leaves R3's slot free.
+FLY_BOOM:	MOVB	F.X(R3),R1
+		BIC	#177400,R1
+		MOVB	F.Y(R3),R2
+		BIC	#177400,R2
+		CLRB	F.ST(R3)
+		MOV	#EK_BOOM,R0
+		CLR	R4
+		CALL	ENT_SPAWN
+		MOV	#SFX_BOOM,SND_REQ
+		RETURN
+
+; A laser bolt at R5 against every flyer (the original tests them in
+; the bullet update, 0x83E3).  Z clear = one was hit; it explodes and
+; the caller scores.  Leaves R5 = ECUR.
+FLY_HITBOLT:	TST	FLYON
+		BEQ	8$
+		MOVB	E.X(R5),R1
+		BIC	#177400,R1
+		MOVB	E.Y(R5),R2
+		BIC	#177400,R2
+		MOV	#FLYS,R3
+		MOV	#NFLY,R4
+1$:		TSTB	F.ST(R3)
+		BEQ	2$
+		MOVB	F.X(R3),R0
+		BIC	#177400,R0
+		SUB	#BVS_MX,R0		; the same sideways slack a
+		CMP	R1,R0			; bolt gets against a shot
+		BLT	2$
+		ADD	#8.+2*BVS_MX-1,R0
+		CMP	R1,R0
+		BGT	2$
+		MOVB	F.Y(R3),R0
+		BIC	#177400,R0
+		CMP	R2,R0
+		BLT	2$
+		ADD	#15.,R0
+		CMP	R2,R0
+		BGT	2$
+		MOV	R3,-(SP)		; hit: put its patch back and
+		MOVB	F.Y(R3),R0		; blow it up
+		BIC	#177400,R0
+		ASR	R0
+		ASR	R0
+		ASR	R0
+		MOVB	F.X(R3),R1
+		BIC	#177400,R1
+		ASR	R1
+		ASR	R1
+		MOV	#3,R2
+		MOV	#3,R3
+		MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		CALL	MARK_RECT
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	#3,R2
+		MOV	#3,R3
+		CALL	CELL_RECT
+		MOV	(SP)+,R3
+		CALL	FLY_BOOM
+		MOV	ECUR,R5
+		MOV	#1,R0
+		RETURN
+2$:		ADD	#F.SIZE,R3
+		DEC	R4
+		BEQ	8$
+		JMP	1$
+8$:		MOV	ECUR,R5
+		CLR	R0
+		RETURN
+
+; ------------------------------------------------------------------
+; Which zones have flyers, and of what kind: {zone, frames between
+; spawns, frame-set * 8 + path id}, ended by 377.  Recovered from the
+; original's table at 0xA677 (see re-notes.md); the frame set indexes
+; FLYFRBT.
+FLYCFG:	.BYTE	3.,20.,8.
+		.BYTE	4.,20.,8.
+		.BYTE	5.,20.,8.
+		.BYTE	10.,20.,25.
+		.BYTE	11.,40.,25.
+		.BYTE	13.,20.,25.
+		.BYTE	15.,13.,2.
+		.BYTE	16.,30.,25.
+		.BYTE	17.,20.,8.
+		.BYTE	19.,20.,27.
+		.BYTE	21.,30.,8.
+		.BYTE	22.,13.,2.
+		.BYTE	26.,8.,19.
+		.BYTE	28.,16.,0.
+		.BYTE	29.,25.,27.
+		.BYTE	30.,15.,27.
+		.BYTE	33.,20.,8.
+		.BYTE	36.,8.,18.
+		.BYTE	37.,20.,1.
+		.BYTE	38.,8.,1.
+		.BYTE	39.,20.,8.
+		.BYTE	42.,8.,27.
+		.BYTE	43.,8.,27.
+		.BYTE	44.,20.,8.
+		.BYTE	48.,20.,27.
+		.BYTE	49.,8.,10.
+		.BYTE	51.,9.,36.
+		.BYTE	54.,30.,45.
+		.BYTE	55.,9.,8.
+		.BYTE	56.,9.,41.
+		.BYTE	58.,20.,13.
+		.BYTE	59.,9.,35.
+		.BYTE	62.,9.,4.
+		.BYTE	63.,9.,32.
+		.BYTE	64.,9.,27.
+		.BYTE	66.,30.,29.
+		.BYTE	68.,8.,16.
+		.BYTE	69.,40.,27.
+		.BYTE	72.,35.,13.
+		.BYTE	74.,12.,29.
+		.BYTE	75.,9.,8.
+		.BYTE	76.,9.,11.
+		.BYTE	77.,9.,36.
+		.BYTE	79.,9.,2.
+		.BYTE	80.,30.,45.
+		.BYTE	83.,9.,45.
+		.BYTE	84.,9.,44.
+		.BYTE	85.,8.,10.
+		.BYTE	86.,9.,19.
+		.BYTE	89.,9.,25.
+		.BYTE	90.,8.,35.
+		.BYTE	91.,25.,44.
+		.BYTE	94.,16.,17.
+		.BYTE	96.,30.,29.
+		.BYTE	98.,35.,45.
+		.BYTE	99.,8.,10.
+		.BYTE	101.,8.,19.
+		.BYTE	103.,10.,0.
+		.BYTE	104.,10.,27.
+		.BYTE	105.,10.,27.
+		.BYTE	108.,10.,8.
+		.BYTE	111.,8.,18.
+		.BYTE	112.,20.,1.
+		.BYTE	113.,8.,1.
+		.BYTE	114.,10.,8.
+		.BYTE	117.,8.,27.
+		.BYTE	118.,8.,27.
+		.BYTE	119.,10.,8.
+		.BYTE	123.,10.,27.
+		.BYTE	124.,8.,10.
+		.BYTE	377
+		.EVEN
+
+FLYFRBT:	.BYTE	1.,16.,20.,24.,37.,41.
+		.EVEN
+FLYPATHS:	.WORD	FP_SINE
+		.WORD	FP_SWOOP
+		.WORD	FP_LOOP
+		.WORD	FP_DART
+		.WORD	FP_DIP
+		.WORD	FP_ZIG
+
+; the six paths, byte for byte the original's tables at 0xA406..0xA507
+FP_SINE:	.BYTE	P_REP,2,-1,0
+		.BYTE	P_REP,2,-1,-1
+		.BYTE	P_REP,2,-1,-2
+		.BYTE	P_REP,6,-1,-3
+		.BYTE	P_REP,2,-1,-2
+		.BYTE	P_REP,2,-1,-1
+		.BYTE	-1,0
+		.BYTE	P_REP,2,-1,1
+		.BYTE	P_REP,2,-1,2
+		.BYTE	P_REP,6,-1,3
+		.BYTE	P_REP,2,-1,2
+		.BYTE	P_REP,2,-1,1
+		.BYTE	P_LOOP
+FP_SWOOP:	.BYTE	P_REP,2,-1,0
+		.BYTE	P_REP,2,-1,-1
+		.BYTE	P_REP,2,-1,-2
+		.BYTE	P_REP,6,-1,-3
+		.BYTE	P_REP,2,-1,-2
+		.BYTE	P_REP,2,-1,-1
+		.BYTE	-1,0
+		.BYTE	P_REP,2,-1,1
+		.BYTE	P_REP,2,-1,2
+		.BYTE	P_REP,6,-1,3
+		.BYTE	P_REP,2,-1,2
+		.BYTE	P_REP,2,-1,1
+		.BYTE	P_REP,15.,-1,0
+		.BYTE	P_REP,6,-2,0
+		.BYTE	P_REP,100.,-4,0
+		.BYTE	P_LOOP
+FP_LOOP:	.BYTE	P_REP,34.,-2,0
+		.BYTE	P_REP,4,-2,-2
+		.BYTE	P_REP,2,-2,-8.
+		.BYTE	P_REP,3,0,-8.
+		.BYTE	P_REP,2,2,-8.
+		.BYTE	P_REP,4,2,-2
+		.BYTE	P_REP,6,2,0
+		.BYTE	P_REP,4,2,2
+		.BYTE	P_REP,2,2,8.
+		.BYTE	P_REP,3,0,8.
+		.BYTE	P_REP,2,-2,8.
+		.BYTE	P_REP,4,-2,2
+		.BYTE	P_REP,100.,-2,0
+		.BYTE	P_LOOP
+FP_DART:	.BYTE	P_REP,40.,-1,0
+		.BYTE	P_REP,100.,-4,0
+		.BYTE	P_LOOP
+FP_DIP:		.BYTE	P_REP,18.,-2,0
+		.BYTE	P_REP,32.,0,-1
+		.BYTE	P_REP,24.,0,1
+		.BYTE	P_REP,6,0,0
+		.BYTE	P_REP,100.,-4,0
+		.BYTE	P_LOOP
+FP_ZIG:		.BYTE	P_REP,8.,-2,-4
+		.BYTE	P_REP,8.,-2,4
+		.BYTE	P_REP,8.,-2,-4
+		.BYTE	P_REP,8.,0,4
+		.BYTE	P_REP,24.,-2,0
+		.BYTE	P_REP,6,0,-4
+		.BYTE	P_REP,6,2,0
+		.BYTE	P_REP,6,0,4
+		.BYTE	P_REP,100.,-4,0
+		.BYTE	P_LOOP
+		.EVEN
