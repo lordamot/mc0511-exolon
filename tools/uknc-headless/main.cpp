@@ -280,6 +280,29 @@ static int ExecuteLine(char *line)
     {
         RunFrames(atoi(tok[1]));
     }
+    else if (!strcmp(cmd, "runrel") && tok.size() >= 3)
+    {
+        // runrel ADDR N [MAXTICKS] -- run emulated frames until the CPU
+        // word at octal ADDR has advanced by N (decimal), or MAXTICKS
+        // frames have passed.  With a frame counter at ADDR this runs
+        // the *game* an exact number of frames however slow it is.
+        unsigned addr;
+        if (!ParseOctal(tok[1], &addr))
+            return Fail("bad octal address: %s", tok[1]);
+        int n = atoi(tok[2]);
+        int maxt = tok.size() >= 4 ? atoi(tok[3]) : n * 8 + 500;
+        uint16_t off = (uint16_t)(addr / 2);   // CPU space = planes 1+2
+        uint16_t start = (uint16_t)(g_pBoard->GetRAMByte(1, off) |
+                                    (g_pBoard->GetRAMByte(2, off) << 8));
+        for (int t = 0; t < maxt; t++)
+        {
+            uint16_t w = (uint16_t)(g_pBoard->GetRAMByte(1, off) |
+                                    (g_pBoard->GetRAMByte(2, off) << 8));
+            if ((uint16_t)(w - start) >= (uint16_t)n)
+                break;
+            RunFrames(1);
+        }
+    }
     else if (!strcmp(cmd, "press") && tok.size() >= 2)
     {
         unsigned code;

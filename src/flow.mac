@@ -9,72 +9,132 @@
 ; full-screen redraw is cheaper than a long list, so the list simply
 ; saturates.
 ;
-; Almost everything marks the same rectangle twice - once where it was
-; erased and once where it was drawn - and anything that has not moved
-; off its cells marks it identically, so the list drops exact repeats.
-; With a dozen sprites on screen that halves the blitting.
-NMARK	= 128.
-MARKN:		.WORD	0
-MARKI:		.WORD	0
-MARKS:		.BLKW	4*NMARK
+; Bits, not a list: a bit per cell, two words per row.  Marking is a
+; couple of masks however big the rectangle, the blit pass walks the
+; bitmap once and pushes every dirty cell to the screen exactly once,
+; and nothing is ever dropped for want of a list slot.
+MASKTAB:	.WORD	0,1,3,7,17,37,77,177,377
+		.WORD	777,1777,3777,7777,17777,37777,77777,177777
 
-MARKS_CLEAR:	CLR	MARKN
+MARKS_CLEAR:	MOV	#DIRTY,R0
+		MOV	#2*NROWS,R1
+1$:		CLR	(R0)+
+		SOB	R1,1$
 		RETURN
 
-; R0 = row, R1 = col, R2 = width, R3 = height.  R4 comes back zero when
-; the rectangle was already on the list, which is also the answer to
-; "has this patch of the back buffer been repainted this frame".
-MARK_RECT:	MOV	MARKN,MARKI
-		BEQ	5$
-		MOV	#MARKS,R4
-1$:		CMP	R0,(R4)+
-		BNE	2$
-		CMP	R1,(R4)+
-		BNE	3$
-		CMP	R2,(R4)+
-		BNE	4$
-		CMP	R3,(R4)+
-		BNE	6$
-		CLR	R4		; already on the list
-		RETURN
-2$:		ADD	#6,R4
-		BR	6$
-3$:		ADD	#4,R4
-		BR	6$
-4$:		ADD	#2,R4
-6$:		DEC	MARKI
-		BNE	1$
-5$:		CMP	MARKN,#NMARK
-		BHIS	9$
-		MOV	MARKN,R4
+; R0 = row, R1 = col, R2 = width, R3 = height.  Preserves R0..R3;
+; R4 comes back zero when every cell was already dirty, which is also
+; the answer to "has this patch been repainted this frame".
+MARK_RECT:	MOV	R0,-(SP)
+		MOV	R1,-(SP)
+		MOV	R2,-(SP)
+		MOV	R3,-(SP)
+		CLR	MRNEW
+		CALL	CLIPRECT
+		BEQ	7$
+		MOV	R0,MRROW	; the clipped row
+		CLR	MRML		; the row masks, built once
+		CLR	MRMR
+		MOV	R1,R4		; left word: bits col..15
+		CMP	R4,#16.
+		BHIS	2$
+		MOV	R2,R5		; n = min(width, 16 - col)
+		MOV	#16.,R0
+		SUB	R4,R0
+		CMP	R5,R0
+		BLOS	1$
+		MOV	R0,R5
+1$:		ASL	R5
+		MOV	MASKTAB(R5),R5
+		MOV	R4,R0
+		BEQ	11$
+10$:		ASL	R5
+		SOB	R0,10$
+11$:		MOV	R5,MRML
+2$:		MOV	R1,R4		; right word: bits 16..col+w-1
+		ADD	R2,R4
+		CMP	R4,#16.
+		BLOS	4$
+		SUB	#16.,R4		; end bit in the right word
+		MOV	R1,R5
+		SUB	#16.,R5		; start bit (clamped at 0)
+		BGE	3$
+		CLR	R5
+3$:		SUB	R5,R4		; n bits from R5
 		ASL	R4
-		ASL	R4
-		ASL	R4
-		ADD	#MARKS,R4
-		MOV	R0,(R4)+
-		MOV	R1,(R4)+
-		MOV	R2,(R4)+
-		MOV	R3,(R4)+
-		INC	MARKN
-9$:		MOV	#1,R4
+		MOV	MASKTAB(R4),R4
+		MOV	R5,R0
+		BEQ	31$
+30$:		ASL	R4
+		SOB	R0,30$
+31$:		MOV	R4,MRMR
+4$:		MOV	MRROW,R0
+		ASL	R0
+		ASL	R0
+		ADD	#DIRTY,R0	; two words per row
+5$:		MOV	MRML,R4		; new bits = mask & ~word
+		BIC	(R0),R4
+		BIS	R4,MRNEW
+		BIS	MRML,(R0)+
+		MOV	MRMR,R4
+		BIC	(R0),R4
+		BIS	R4,MRNEW
+		BIS	MRMR,(R0)+
+		SOB	R3,5$
+7$:		MOV	(SP)+,R3
+		MOV	(SP)+,R2
+		MOV	(SP)+,R1
+		MOV	(SP)+,R0
+		MOV	MRNEW,R4
 		RETURN
 
-BLIT_MARKS:	TST	MARKN
+; Push every dirty cell to the screen, one blit per run of set bits.
+BLIT_MARKS:	CLR	BLROW
+1$:		MOV	BLROW,R0
+		ASL	R0
+		ASL	R0
+		ADD	#DIRTY,R0
+		MOV	(R0),BLVAL
+		CLR	(R0)+		; consume the row as it is blitted
+		CLR	BLCOL
+		CALL	BLIT_WORD
+		MOV	BLROW,R0
+		ASL	R0
+		ASL	R0
+		ADD	#DIRTY+2,R0
+		MOV	(R0),BLVAL
+		CLR	(R0)
+		MOV	#16.,BLCOL
+		CALL	BLIT_WORD
+		INC	BLROW
+		CMP	BLROW,#NROWS
+		BLO	1$
+		RETURN
+
+; blit the runs of BLVAL's set bits as cells BLCOL.. of row BLROW
+BLIT_WORD:	TST	BLVAL
 		BEQ	9$
-		MOV	#MARKS,R5
-		MOV	MARKN,R4
-1$:		MOV	R4,-(SP)
-		MOV	R5,-(SP)
-		MOV	(R5)+,R0
-		MOV	(R5)+,R1
-		MOV	(R5)+,R2
-		MOV	(R5)+,R3
-		CALL	BLIT_RECT
-		MOV	(SP)+,R5
-		MOV	(SP)+,R4
-		ADD	#8.,R5
-		SOB	R4,1$
-		CLR	MARKN
+1$:		CLC			; ROR, not ASR: the sign bit of a
+		ROR	BLVAL		; full row must shift out, not stick
+		BCS	2$
+		INC	BLCOL
+		TST	BLVAL
+		BNE	1$
+		RETURN
+2$:		MOV	#1,BLLEN	; measure the run
+3$:		CLC
+		ROR	BLVAL
+		BCC	4$
+		INC	BLLEN
+		BR	3$
+4$:		MOV	BLROW,R0
+		MOV	BLCOL,R1
+		MOV	BLLEN,R2
+		CALL	BLIT_CELLS
+		ADD	BLLEN,BLCOL
+		INC	BLCOL		; the clear bit the run ended on
+		TST	BLVAL
+		BNE	1$
 9$:		RETURN
 
 ; ---- randomness --------------------------------------------------
@@ -88,7 +148,6 @@ BLIT_MARKS:	TST	MARKN
 ; bursts - the wall guns laid down an unbroken line of shots instead of
 ; the odd one.  Multiplying mixes the whole word every call, and the
 ; high byte of an LCG is the half worth using.
-RNDTMP:		.WORD	0
 RNDMUL	= 25173.
 RNDADD	= 13849.
 
@@ -148,15 +207,17 @@ SC_ZONE:	.ASCII	/000100/
 		.EVEN
 
 ; ---- game cycle --------------------------------------------------
-GAMEOVER:	.WORD	0
-
 GAME_START:	CLR	ZONE
-		MOV	#1,RNDSEED
+		TST	ZSELON		; menu option 3: start from a chosen
+		BEQ	1$		; zone instead of the first
+		MOV	ZSEL,ZONE
+1$:		MOV	#1,RNDSEED
 		MOV	#7,LIVES
 		MOV	#99.,AMMO
 		MOV	#10.,GRENADES
 		CLR	PSUIT
 		CLR	GAMEOVER
+		CLR	PAUSEREQ
 		CALL	SCORE_CLEAR
 		MOV	#8.,PXENT
 		MOV	#96.,PYENT
@@ -177,9 +238,18 @@ GAME_RUN:	CALL	GAME_START
 3$:		TST	ZONELOAD
 		BEQ	2$
 		CALL	ZONE_LOAD
-		CALL	MARKS_CLEAR
 2$:		CALL	MARKS_CLEAR
-		CALL	ENTS_ERASE
+		CLR	DRAWSKIP
+20$:		CLR	DRAWOFF		; when the last frame overran its
+		CMP	DRAWSKIP,#2	; tick, update with the sprites
+		BHIS	23$		; undrawn and catch up - the game
+		TST	VBLF		; keeps 50 Hz speed and the screen
+		BEQ	23$		; drops to half or a third rate
+		MOV	#1,DRAWOFF
+		INC	DRAWSKIP
+23$:		CALL	ENTS_ERASE
+		CALL	FLY_ERASE
+		CALL	PUMPS_ERASE
 		CALL	PL_ERASE
 		CALL	PLAYER_UPD
 		CALL	PL_SPECIAL
@@ -189,12 +259,34 @@ GAME_RUN:	CALL	GAME_START
 		CALL	ROCK_CHECK
 		CALL	MINE_CHECK
 		CALL	EMIT_CHECK
+		CALL	FLY_SPAWN
 		CALL	ENTS_UPD
+		CALL	FLY_UPD
+		CALL	PUMPS_UPD
+		CALL	ANIMS_UPD
 		CALL	PL_SHOW
 		CALL	HUD_UPD
-		CALL	BLIT_MARKS
 		INC	FRAMECNT
-		TST	GAMEOVER
+		INC	BENCHF
+		TST	DRAWOFF
+		BEQ	21$
+		CALL	VSYNC		; the tick the extra pass consumed
+		CALL	INPUT_READ
+		MOV	#K_STOP,R0	; this read consumes the edges, so
+		CALL	KEY_HELD	; СТОП and АР2 must be looked at
+		BEQ	24$		; here as well - АР2 only takes
+		BR	9$		; effect once the frame is drawn
+24$:		MOV	#K_PAUSE,R0
+		CALL	KEY_EDGE
+		BEQ	25$
+		MOV	#1,PAUSEREQ
+25$:		BR	20$
+21$:		CALL	BLIT_MARKS
+		TST	PAUSEREQ
+		BEQ	26$
+		CLR	PAUSEREQ
+		CALL	PAUSE
+26$:		TST	GAMEOVER
 		BEQ	1$
 		CALL	SHOW_GAMEOVER
 9$:		RETURN
@@ -268,8 +360,6 @@ PAUSE:		MOV	#11.,R0		; keep the cells the message covers
 		MOV	#1,R3
 		CALL	BLIT_RECT
 		RETURN
-
-PAUSAVE:	.BLKW	12.
 
 ; ------------------------------------------------------------------
 ; Wait for the next 50 Hz tick (the ISR shifts a bit into VBLF).
@@ -354,6 +444,12 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		MOV	#S_LIVESOPT,R3
 		CALL	PRINT_STR
 		CALL	MENU_CHEAT
+		MOV	#ZS_ROW,R0	; option 3: start from a chosen zone,
+		MOV	#6,R1		; picked with up / down while it is on
+		MOV	#3,R2
+		MOV	#S_ZONEOPT,R3
+		CALL	PRINT_STR
+		CALL	MENU_ZOPT
 		MOV	#14.,R0
 		MOV	#10.,R1
 		MOV	#2,R2
@@ -375,18 +471,47 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		XOR	R0,CHEAT
 		CALL	MENU_CHEAT
 		CALL	MENU_SHOWCH
-5$:		MOV	#K_1,R0		; '1' starts, as the menu says
+5$:		MOV	#K_3,R0		; '3' toggles the starting-zone pick
+		CALL	KEY_EDGE
+		BEQ	6$
+		MOV	#1,R0
+		XOR	R0,ZSELON
+		CALL	MENU_ZSHOW
+6$:		TST	ZSELON		; up / down pick the zone while it is on
+		BEQ	7$
+		MOV	#K_UP,R0
+		CALL	KEY_EDGE
+		BEQ	62$
+		INC	ZSEL
+		CMP	ZSEL,#125.
+		BLO	61$
+		CLR	ZSEL
+61$:		CALL	MENU_ZSHOW
+62$:		MOV	#K_DOWN,R0
+		CALL	KEY_EDGE
+		BEQ	7$
+		DEC	ZSEL
+		BGE	63$
+		MOV	#124.,ZSEL
+63$:		CALL	MENU_ZSHOW
+7$:		MOV	#K_1,R0		; '1' starts, as the menu says
 		CALL	KEY_EDGE
 		BEQ	2$
 		CLR	SND_MODE
 		RETURN
 
 ; ------------------------------------------------------------------
-; The state of menu option 2, at the end of its line.  Written into the
-; cell buffer only - MENU expands and blits the whole screen after the
-; first call, and MENU_SHOWCH does the three cells after a toggle.
-CH_ROW	= 12.
+; The state of menu options 2 and 3, at the end of their lines.
+; Written into the cell buffer only - MENU expands and blits the whole
+; screen after the first call, and MENU_SHOWCH / MENU_ZSHOW do the few
+; changed cells after a toggle.
+CH_ROW	= 11.
 CH_COL	= 23.
+ZS_ROW	= 12.
+ZS_COL	= 24.
+
+ZSELON:		.WORD	0	; option 3 armed
+ZSEL:		.WORD	0	; the zone a game will then start in
 
 MENU_CHEAT:	MOV	#CH_COL,MENUC	; blank it first: ON is shorter than
 1$:		MOV	#CH_ROW,R0	; OFF, and CELL_SET keeps no registers
@@ -407,8 +532,6 @@ MENU_CHEAT:	MOV	#CH_COL,MENUC	; blank it first: ON is shorter than
 		CALL	PRINT_STR
 		RETURN
 
-MENUC:		.WORD	0
-
 MENU_SHOWCH:	MOV	#CH_ROW,R0
 		MOV	#CH_COL,R1
 		MOV	#3,R2
@@ -416,6 +539,59 @@ MENU_SHOWCH:	MOV	#CH_ROW,R0
 		CALL	CELL_RECT
 		MOV	#CH_ROW,R0
 		MOV	#CH_COL,R1
+		MOV	#3,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
+		RETURN
+
+; ------------------------------------------------------------------
+; Option 3's state cells: OFF, or the chosen zone as three digits.
+MENU_ZOPT:	MOV	#ZS_COL,MENUC	; blank the three cells first
+1$:		MOV	#ZS_ROW,R0
+		MOV	MENUC,R1
+		CLR	R2
+		CLR	R4
+		CALL	CELL_SET
+		INC	MENUC
+		CMP	MENUC,#ZS_COL+3
+		BLO	1$
+		TST	ZSELON
+		BNE	2$
+		MOV	#ZS_ROW,R0
+		MOV	#ZS_COL,R1
+		MOV	#2,R2
+		MOV	#S_OFF,R3
+		CALL	PRINT_STR
+		RETURN
+2$:		MOV	ZSEL,R4		; three digits, HUD style
+		MOV	#ZS_COL+2,MENUC
+3$:		MOV	R4,R0		; R0 = R4 % 10, R4 /= 10
+		CLR	R4
+4$:		SUB	#10.,R0
+		BLT	5$
+		INC	R4
+		BR	4$
+5$:		ADD	#10.+60,R0
+		MOV	R4,-(SP)
+		MOV	R0,R4
+		MOV	#ZS_ROW,R0
+		MOV	MENUC,R1
+		MOV	#2,R2
+		CALL	CELL_SET
+		MOV	(SP)+,R4
+		DEC	MENUC
+		CMP	MENUC,#ZS_COL
+		BGE	3$
+		RETURN
+
+MENU_ZSHOW:	CALL	MENU_ZOPT
+		MOV	#ZS_ROW,R0
+		MOV	#ZS_COL,R1
+		MOV	#3,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#ZS_ROW,R0
+		MOV	#ZS_COL,R1
 		MOV	#3,R2
 		MOV	#1,R3
 		CALL	BLIT_RECT

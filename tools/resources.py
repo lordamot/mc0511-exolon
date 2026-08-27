@@ -26,6 +26,7 @@ OP_BASE = 0xE6
 OP_SOLID = 0xE8
 OP_HIT = 0xE9            # 'hit 0'; 'hit 255' is 0xEA
 OP_HITF = 0xEA
+OP_ANIM = 0xEB           # 'anim n'  : runtime animation hook (class n)
 OP_END = 0xFF
 
 
@@ -120,6 +121,8 @@ def assemble_list(ops, list_addr):
             out += bytes([OP_BASE, op[1] & 0xFF, (op[1] >> 8) & 0xFF])
         elif k == "solid":
             out += bytes([OP_SOLID, op[1] & 0xFF])
+        elif k == "anim":
+            out += bytes([OP_ANIM, op[1] & 0xFF])
         elif k == "hit":
             out.append(OP_HITF if op[1] else OP_HIT)
         elif k == "end":

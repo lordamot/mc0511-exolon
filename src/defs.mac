@@ -84,6 +84,9 @@ OB_TREE	= 46.		; energy tree
 ; in player.mac holds the same solid/passable split the original's
 ; table at 0x8EF4 applies.
 ; Objects 17 and 29 are the booths the two "press up" classes sit in.
+CL_ANIM2 = 2.		; jet flame under a platform / ship (0x8F5A)
+CL_BOOTH = 4.		; booth / gantry frame: colour cycles (0x9118)
+CL_MINE5 = 5.		; land mine: goes off underfoot (0x9152)
 CL_TPORT = 6.		; teleport pad     (press up)
 CL_AMMO	= 7.		; ammunition canister (walk into)
 CL_GREN	= 8.		; grenade canister    (walk into)
@@ -91,7 +94,44 @@ CL_FIELD = 9.		; force-field beam
 CL_EMIT	= 11.		; wall emitter: spits along its own row
 CL_SUIT	= 12.		; power-suit booth (press up)
 CL_MINE	= 13.		; mine
+CL_PUMP	= 10.		; the rising pump (an anim hook, 0x9C15)
+CL_ARC	= 15.		; energy arc between pylons (an anim hook, 0xA7D6)
+CL_GATE	= 16.		; level gate anchor (an anim hook; not yet acted on)
+CL_BEAM	= 17.		; vertical laser beam under a platform (0xABCF)
 NSPEC	= 2		; teleport pads / suit booths kept per zone
+
+; ---- the runtime scenery animations -------------------------------
+; The tile sets all live at the original's 0xDAB8 base = index 91 of
+; the flat bank (0x8F53 / 0x9152 / 0xAB9F set that base first).
+FLAME_T	= 112.		; three pairs of jet-flame tiles (0x15,0x16..0x1A)
+MBLINK_T = 120.		; two pairs of burning-mine tiles (0x1D..0x20)
+BEAM_T	= 128.		; the laser beam's one tile (0x25)
+PUMP_FR	= 24.		; the pump is player-bank frame 24 (0x9C5F)
+ARC_FR	= 28.		; the arcs flicker over 16x16 frames 28..31 (+1)
+NFLAME	= 10.		; class-2 anchors kept per zone
+NCYC4	= 24.		; class-4 cell runs kept per zone
+NMINE5	= 10.		; land mines kept per zone
+NPUMP	= 6		; pumps kept per zone
+NHOOK	= 12.		; anim-hook cells a zone's lists may file
+PUMP_LO	= 101.		; the pump counter's states (0x9C2C..0x9C42):
+PUMP_UP	= 105.		;   101..104 rising, 105..115 held up,
+PUMP_DN	= 116.		;   116..119 sinking, 120 rests and rerolls
+PUMP_END = 120.
+BEAM_HITS = 25.		; laser bolts that cut the beam down (0xAC28)
+
+; ---- the swooping flyers (0xA553 / 0xA360) ------------------------
+NFLY	= 6		; slots, as the original's 0xA508 list
+F.ST	= 0.		; 0 = free
+F.X	= 1.		; x in 2-pixel units
+F.Y	= 2.		; y in pixels
+F.PH	= 3.		; animation phase (frame = base + (phase & 3))
+F.REP	= 4.		; repeat count inside a C4 block
+F.PTR	= 6.		; current position in the path byte code
+F.SIZE	= 8.
+FLY_NEAR = 84.		; only spawned while the player is left of this
+FLY_ROLL = 200.		; and a random byte comes up at or above this
+P_REP	= 304		; path byte code: 0304 n dx dy = repeat block
+P_LOOP	= 303		;                 0303 = back to the start
 
 ; ---- pickup record (canisters, built at zone load) ----------------
 P.ROW	= 0.
@@ -148,11 +188,11 @@ MINE_FAST = 70.
 TPFX_LEN = 20.
 SPARK_LEN = 10.
 
-; The power suit is two guns, not one: it fires a heavier bolt from the
-; standing muzzle and a second SUIT_GAP pixels below it, which is the
-; gap between the two barrels of a wall gun - so a suited player can cut
-; down both of its streams at once.
-SUIT_GAP = 8.
+; The power suit is two guns, not one: it fires a second bolt SUIT_GAP
+; pixels below the standing muzzle (the original's `add a,6` at 0x8384).
+; A wall gun's streams sit eight pixels apart, and the two bolts still
+; reach one each - so a suited player cuts down both at once.
+SUIT_GAP = 6.
 
 ; ---- sound requests (SND_REQ) ------------------------------------
 SFX_SHOT = 1

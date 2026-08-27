@@ -739,7 +739,8 @@ list 21   ; object 21
   tile 19
   end
 
-list 22   ; object 22
+list 22   ; object 22 - the rising pump (runtime class 10)
+  anim 10
   end
 
 list 23   ; object 23
@@ -1267,7 +1268,8 @@ list 38   ; object 38
   tile 5
   end
 
-list 39   ; object 39
+list 39   ; object 39 - free energy balls (runtime class 9)
+  anim 9
   end
 
 list 40   ; object 40
@@ -1345,10 +1347,11 @@ list 41   ; object 41
   tile 5
   end
 
-list 42   ; object 42
+list 42   ; object 42 - the level gate pylons
   base 556
   call 64
   move 0 2
+  anim 15
   move 0 4
   call 64
   move 14 252
@@ -1360,6 +1363,7 @@ list 42   ; object 42
   tile 18
   tile 19
   move -5 253
+  anim 16
   end
 
 list 43   ; object 43
@@ -1520,10 +1524,11 @@ list 50   ; object 50
   endrep
   end
 
-list 51   ; object 51
+list 51   ; object 51 - pylon pair with an energy arc
   base 641
   call 65
   move 4 2
+  anim 15
   move -4 4
   call 65
   end

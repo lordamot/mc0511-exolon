@@ -7,15 +7,9 @@
 ; afterwards.
 ; ------------------------------------------------------------------
 
-LROW:		.WORD	0	; cursor, cell units, wrapped to 8 bits
-LCOL:		.WORD	0
-LINK:		.WORD	8.	; current ink + 1
-LBASE:		.WORD	0	; tile bank base
-LSOLID:		.WORD	1	; collision class written with every cell
-LHIT:		.WORD	0
-LERASE:		.WORD	0	; nonzero: blank the cells instead of drawing
-LSTKP:		.WORD	0	; repeat stack pointer (bytes)
-LSTK:		.BLKW	16.	; 8 x {count, resume address}
+; The cursor state (LROW, LCOL, LINK, LBASE, LSOLID, LHIT, LERASE,
+; LSTKP, LSTK) lives in gamevars.mac; every caller initialises what it
+; uses, and MAIN_START clears LERASE once.
 
 ; ------------------------------------------------------------------
 ; Run the display list at R4.  Clobbers R0..R5.
@@ -186,9 +180,27 @@ LIST_RUN:	MOVB	(R4)+,R0
 		CLR	LHIT
 		JMP	LIST_RUN
 150$:		CMP	R0,#352
-		BNE	160$
+		BNE	155$
 		MOV	#377,LHIT
 		JMP	LIST_RUN
+155$:		CMP	R0,#353		; 0353: runtime animation hook - file
+		BNE	160$		; the cursor cell under class n (the
+		MOVB	(R4)+,R0	; original's opcode EB, resolved by
+		BIC	#177400,R0	; the class scan at 0x8E86)
+		TST	LERASE		; replaying a list in erase mode must
+		BNE	151$		; not file anything
+		CMP	HOOKN,#NHOOK
+		BHIS	151$
+		MOV	HOOKN,R1
+		MOV	R1,R2
+		ASL	R1
+		ADD	R2,R1		; *3
+		ADD	#HOOKS,R1
+		MOVB	R0,(R1)+	; class
+		MOVB	LROW,(R1)+
+		MOVB	LCOL,(R1)+
+		INC	HOOKN
+151$:		JMP	LIST_RUN
 160$:		RETURN			; anything else ends the list
 
 L_WRAP:		BIC	#177400,LROW

@@ -23,8 +23,9 @@ EK_ROCK	= 8.		; the rocket that hunts a lingerer (0xAC7D)
 EK_TPFX	= 9.		; a teleport pad's spark emitter (0x9EEE)
 EK_MINE	= 10.		; a mine's homing missile (0xA26B)
 EK_EMIT	= 11.		; a wall emitter's bolt (0x9D7F / 0x9DD6)
-EK_BOLT2 = 12.		; the power suit's bolt: heavier, and two at once
-NKIND	= 13.
+EK_BOLT2 = 12.		; the power suit's second bolt (same dash, lower)
+EK_ARC	= 13.		; energy arc between a pair of pylons (0xA7D6)
+NKIND	= 14.
 
 SPR_GRENR = 46.		; the grenade in flight, facing right and left
 SPR_GRENL = 47.
@@ -34,7 +35,8 @@ SPR_ROCK = 36.		; the rocket that hunts a lingering player
 SPR_MINE = 10.		; a mine's missile, closing and then bearing down
 SPR_MINE2 = 11.
 SPR_EMIT = 52.		; a wall emitter's bolt
-SPR_BOLT2 = 45.		; the power suit's bolt
+SPR_DASH = 57.		; the player's bolt: the original's 0xBD dash,
+			; drawn at two-pixel resolution (0x82FC)
 
 ; The 16x16 bank holds two halves of an explosion: 12..15 is the flash
 ; opening up and 5..9 the sparks thinning out (frame 0 is blank - the
@@ -84,15 +86,15 @@ GRENMAXX = 118.		; it cannot be thrown any closer to the right edge
 ; KINDRW/H the cell rectangle the kind covers, for erase and blit
 ; KINDW/H  its collision box, x units and pixels - the numbers the
 ;          original passes to 0x9BD6 in BC
-KINDPIX:	.BYTE	0,1,1,0,0,0,0,0,0,1,0,0,0
-KINDRW:		.BYTE	1,1,1,3,4,4,2,2,4,1,4,2,3
-KINDRH:		.BYTE	1,1,1,2,3,3,2,2,3,1,3,2,2
-KINDW:		.BYTE	1,1,1,8.,8.,8.,1,4.,16.,1,16.,4.,6.
-KINDH:		.BYTE	1,1,1,8.,16.,16.,1,8.,8.,1,8.,8.,2
+KINDPIX:	.BYTE	0,0,1,0,0,0,0,0,0,1,0,0,0,0
+KINDRW:		.BYTE	1,3,1,3,4,4,2,2,4,1,4,2,3,5
+KINDRH:		.BYTE	1,1,1,2,3,3,2,2,3,1,3,2,1,3
+KINDW:		.BYTE	1,1,1,8.,8.,8.,1,4.,16.,1,16.,4.,6.,1
+KINDH:		.BYTE	1,1,1,8.,16.,16.,1,8.,8.,1,8.,8.,2,1
 ; how much of a 16x16 frame actually holds anything: lines, and cells
 ; across (an eight-pixel frame spans two cells at any sub-cell shift)
-KINDSH:		.BYTE	8.,8.,8.,8.,16.,16.,8.,8.,16.,8.,16.,8.,2
-KINDSW:		.BYTE	2,2,2,2,4,4,2,2,4,2,4,2,3
+KINDSH:		.BYTE	8.,1,8.,8.,16.,16.,8.,8.,16.,8.,16.,8.,1,16.
+KINDSW:		.BYTE	2,3,2,2,4,4,2,2,4,2,4,2,3,4
 ; Which way a kind's frame faces: 0 = it does not matter, 1 = the art
 ; faces right, 2 = it faces left.  The original is not consistent about
 ; this - the missiles (frames 10 and 11) are drawn facing left and the
@@ -102,7 +104,11 @@ KINDSW:		.BYTE	2,2,2,2,4,4,2,2,4,2,4,2,3
 ; same way it turns the player round.
 MIR_R	= 1
 MIR_L	= 2
-KINDMIR:	.BYTE	0,0,0,0,0,MIR_L,0,0,MIR_R,0,MIR_L,0,0
+KINDMIR:	.BYTE	0,0,0,0,0,MIR_L,0,0,MIR_R,0,MIR_L,0,0,0
+; how far left of the entity's own x its frame is drawn: the bolts'
+; dash is centred on the bolt the way the original's byte-aligned
+; window roughly is
+KINDDX:		.BYTE	0,2,0,0,0,0,0,0,0,0,0,0,2,0
 		.EVEN
 
 EN_TAB:		.WORD	EN_KILL		; 0: never happens
@@ -118,6 +124,7 @@ EN_TAB:		.WORD	EN_KILL		; 0: never happens
 		.WORD	EN_MINE
 		.WORD	EN_EMIT
 		.WORD	EN_BOLT		; the suit's bolt flies like any other
+		.WORD	EN_ARC		; pinned pylon arc (anims.mac)
 
 ENTS_CLEAR:	MOV	#ENTS,R0
 		MOV	#E.SIZE*NENT,R1
@@ -182,10 +189,10 @@ SHOOT_BOLT:	TST	PDEAD
 		TST	PDUCK
 		BEQ	1$
 		ADD	#5,R2
-1$:		MOV	#3,R4
-		TST	PFACE
-		BGT	2$
-		MOV	#-3,R4
+1$:		MOV	#1,R4		; one unit per update, five updates a
+		TST	PFACE		; frame - the original's 0x83DD is
+		BGT	2$		; called five times per game loop
+		MOV	#-1,R4
 		SUB	#4,R1
 		BGE	3$
 		CLR	R1
@@ -207,11 +214,6 @@ SHOOT_BOLT:	TST	PDEAD
 4$:		CALL	ENT_SPAWN
 9$:		RETURN
 
-BOLTX:		.WORD	0
-BOLTY:		.WORD	0
-BOLTS:		.WORD	0
-
-; ------------------------------------------------------------------
 ; The player throws a grenade (0x9208).  Only one is ever in the air,
 ; it leaves the shoulder rather than the hip, and it goes nowhere if he
 ; is standing against the right-hand edge of the zone.
@@ -276,7 +278,6 @@ ENTS_UPD:	MOV	#ENTS,R5
 
 ; one entity: R5 = record (also kept in ECUR, because the cell and
 ; blit helpers clobber every register)
-ECUR:		.WORD	0
 ENT_ONE:	MOV	R5,ECUR
 		MOVB	E.KIND(R5),R1
 		BIC	#177400,R1
@@ -291,13 +292,24 @@ ENT_ONE:	MOV	R5,ECUR
 ; sprite-occupancy map, so the only things it destroys are the moving
 ; enemies and the shots in the air.  Emplacements and rock formations
 ; are the grenade's job - see GREN_BLAST.
-EN_BOLT:	CALL	ENT_STEPX
+;
+; The update runs five times a frame at one unit a step, exactly as the
+; original's main loop calls 0x83DD five times - that is both the
+; bolt's speed and what keeps it from stepping over a thin wall or a
+; target inside one frame.  It is drawn once, as the original's 0xBD
+; dash pattern (SPR_DASH).
+EN_BOLT:	MOV	#5,BOLTN
+10$:		CALL	ENT_STEPX
 		BNE	90$
 		JMP	EN_KILL
-90$:		CALL	BOLT_VS_SHOT	; shoot an incoming shot down
+90$:		CALL	BOLT_BEAM	; chip at the laser beam in passing
+		CALL	BOLT_VS_SHOT	; shoot an incoming shot down
 		BEQ	1$
 		JMP	EN_HITOBJ
-1$:		CALL	ENT_CELLCLASS
+1$:		CALL	FLY_HITBOLT	; a swooping flyer in the way?
+		BEQ	11$
+		JMP	EN_HITOBJ
+11$:		CALL	ENT_CELLCLASS
 		MOV	R2,R0
 		CALL	CLASS_BLOCK
 		BEQ	2$
@@ -307,15 +319,14 @@ EN_BOLT:	CALL	ENT_STEPX
 		JMP	EN_HITOBJ
 91$:		JMP	EN_KILL		; plain scenery just stops the bolt
 2$:		MOV	ECUR,R5
+		DEC	BOLTN
+		BNE	10$
 		INCB	E.T2(R5)
-		CMPB	E.T2(R5),#40.
+		CMPB	E.T2(R5),#12.	; 60 units, the original's range
 		BLO	92$
 		JMP	EN_KILL
-92$:		CALL	ENT_ISPIX	; the suit's bolt is a sprite, the
-		BNE	93$		; pistol's a single pixel (ENT_ISPIX
-		MOV	#SPR_BOLT2,R0	; keeps R5, and nothing may touch the
-		JMP	ENT_SHOW	; flags between the two)
-93$:		JMP	ENT_SHOWPIX
+92$:		MOV	#SPR_DASH,R0
+		JMP	ENT_SHOW
 
 ; ---- enemy shot / missile ----------------------------------------
 EN_SHOT:	CALL	ENT_STEPX
@@ -347,10 +358,6 @@ EN_SHOT:	CALL	ENT_STEPX
 ; and three times a frame afterwards (the extra calls at 0x7604 and
 ; 0x761B), which is what makes it leave in a lazy lob and then tear
 ; away.  Each step is one x unit; the arc table supplies the rise.
-GRSTEPS:	.WORD	0
-GRIDX:		.WORD	0
-GRDY:		.WORD	0
-
 EN_GREN:	MOV	#1,GRSTEPS
 		MOVB	E.T2(R5),R0
 		BIC	#177400,R0
@@ -454,11 +461,14 @@ EN_BOOM:	INCB	E.T2(R5)
 		MOV	ECUR,R5
 		JMP	ENT_SHOW
 
-; Turn the entity into an explosion.  A one-pixel entity has to move
-; back half a sprite first, or the blast hangs off its lower right.
+; Turn the entity into an explosion.  A pixel or dash entity has to
+; move back half a sprite first, or the blast hangs off its lower right.
 EN_BOOMSTART:	MOV	ECUR,R5
-		CALL	ENT_ISPIX
-		BEQ	1$
+		CALL	ENT_KIND
+		MOVB	KINDSH(R4),R0
+		BIC	#177400,R0
+		CMP	R0,#2
+		BGT	1$
 		MOVB	E.X(R5),R0
 		BIC	#177400,R0
 		SUB	#4,R0
@@ -532,11 +542,6 @@ EN_TPFX:	MOVB	E.T2(R5),R0
 ; 0x9A23: it drifts sideways until an edge, a wall or plain luck turns
 ; it round, and wanders a pixel up or down every frame.  A bolt pops it
 ; for points (BOLT_VS_SHOT); touching it is fatal.
-BALLDY:		.WORD	0
-BALLX:		.WORD	0
-BALLY:		.WORD	0
-BALLN:		.WORD	0
-
 EN_BALL:	MOVB	E.X(R5),R0
 		BIC	#177400,R0
 		BEQ	1$		; the edges turn it round
@@ -634,8 +639,6 @@ BALL_EMIT:	MOV	BALLQ,BALLN
 
 ; How many balls each of this zone's force fields gets: BALLS when there
 ; is one, and the same total split between them when there are more.
-BALLQ:		.WORD	0
-
 BALL_SHARE:	MOV	#BALLS,R0
 		TST	R1
 		BLE	9$
@@ -783,16 +786,11 @@ EN_MINE:	MOV	MINEROW,R0
 		MOV	MINEFR,R0
 		JMP	ENT_SHOW
 
-MINEFR:		.WORD	0
-
-; ---- wall emitters ------------------------------------------------
 ; 0x9D7F: every frame each emitter draws a random byte and spits a bolt
 ; down its own row when the byte is high enough and the player is still
 ; well to the left of it.  0x9DD6 flies the bolt straight left until it
 ; runs off the edge; it kills on contact and a laser bolt shoots it down
 ; (0x9E37), which is the pair of guns that used to do nothing at all.
-EMITI:		.WORD	0
-
 EMIT_CHECK:	TST	NEMIT
 		BEQ	9$
 		CLR	EMITI
@@ -933,12 +931,6 @@ OBJ_CLEAR:	MOVB	O.Y0(R3),R0
 		CALL	MARK_RECT
 		RETURN
 
-OCROW:		.WORD	0
-OCCOL:		.WORD	0
-OCW:		.WORD	0
-OCH:		.WORD	0
-
-; ------------------------------------------------------------------
 ; Put the background back where the entity at R3 is drawn, and mark
 ; the rectangle.  Used when something is removed after it has already
 ; been drawn this frame.  Preserves R3.
@@ -978,13 +970,6 @@ ENT_WIPE:	MOV	R3,-(SP)
 ; upper stream and a crouched one only the lower, and it takes the power
 ; suit's pair of guns to cut down both at once.
 BVS_MX	= 3		; margin, x units
-BVSN:		.WORD	0
-BVSOBJ:		.WORD	0
-BVSW:		.WORD	0
-BVSH:		.WORD	0
-BVSMW:		.WORD	0
-BVSMH:		.WORD	0
-
 BOLT_VS_SHOT:	MOV	ECUR,R5		; the bolt's own box
 		CALL	ENT_BOX
 		MOV	R2,BVSMW
@@ -1075,7 +1060,12 @@ ENT_SHOW:	MOV	R0,-(SP)
 1$:		MOV	(SP)+,R0
 		MOVB	E.X(R5),R1
 		BIC	#177400,R1
-		MOVB	E.Y(R5),R2
+		MOVB	KINDDX(R4),R2	; the bolts' dash draws left of x
+		BIC	#177400,R2
+		SUB	R2,R1
+		BGE	4$
+		CLR	R1
+4$:		MOVB	E.Y(R5),R2
 		BIC	#177400,R2
 		CALL	SPR_SMALL
 		MOV	ECUR,R5
@@ -1125,6 +1115,13 @@ ENT_RECT:	CALL	ENT_KIND
 		ASR	R0
 		MOVB	E.X(R5),R1
 		BIC	#177400,R1
+		MOV	R3,-(SP)
+		MOVB	KINDDX(R4),R3	; cover the drawn frame, not just x
+		BIC	#177400,R3
+		SUB	R3,R1
+		BGE	1$
+		CLR	R1
+1$:		MOV	(SP)+,R3
 		ASR	R1
 		ASR	R1
 		RETURN
@@ -1230,13 +1227,6 @@ ENT_CELLCLASS:	CALL	ENT_HOT
 ; map is only read when the coordinate sits on a cell boundary, and the
 ; neighbouring cell as well when the sprite straddles two.  R5 = the
 ; entity; both return R0 = 0 when the way is clear and leave ECUR in R5.
-GRROW:		.WORD	0
-GRCOL:		.WORD	0
-GRSPAN:		.WORD	0
-GRACC:		.WORD	0
-GRDELTA:	.WORD	0
-
-; the cell it is about to move into, in its own direction of travel
 GREN_WALL:	MOVB	E.X(R5),R0
 		BIC	#177400,R0
 		MOV	R0,R1
@@ -1383,11 +1373,6 @@ OBJ_GRENONLY:	MOVB	O.OBJ(R3),R2
 ; original does not open holes in plain scenery, so neither does this:
 ; the way out of a blocked zone is the rock formation, which is a live
 ; object, and so are the emplacements a bolt cannot touch.
-GBOBJ:		.WORD	0
-GBN:		.WORD	0
-GBROW:		.WORD	0
-GBCOL:		.WORD	0
-
 GREN_BLAST:	MOV	ECUR,R5
 		CALL	ENT_HOT			; blast centre, in cells
 		MOV	R0,GBROW

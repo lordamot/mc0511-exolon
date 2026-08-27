@@ -35,12 +35,13 @@ make extract   # re-extract every resource from EXOLON.TAP (destructive)
 
 In `make run` the firmware boot menu loads the disk by itself (the disk
 answers to the name `EXOLON`).  The title screen carries the original's
-two numbered options:
+numbered options and one more:
 
 | Key | Action |
 |---|---|
 | 1 | start the game |
 | 2 | infinite lives on / off |
+| 3 | start from a chosen zone - pick it with ↑ / ↓ while the option is on |
 
 and in play:
 
@@ -59,9 +60,24 @@ fire down their own row - always to the left, the side you come from -
 and rock back as they do; crouch and the shot goes over your head.  The
 guns bolted to the walls, singly and in pairs, spit along their own row
 at you as you come; force fields fill their rings with energy balls
-that swirl about and kill on contact; and mines throw a missile in from
-the right that comes down to your own height, over and over, until you
-shoot the mine out.
+that swirl about and kill on contact - and where a pair of pylons
+stands with nothing between it, the balls drift loose; and mines throw
+a missile in from the right that comes down to your own height, over
+and over, until you shoot the mine out.
+
+The scenery is alive the way the original's is.  Jet flames flicker
+under the hovering platforms, the parked spaceships and the pods; the
+teleport booths shimmer through their colours; energy arcs crackle
+between pylon pairs.  Land mines sit armed in the floor and go off
+underfoot, then burn for the rest of your visit; pumps rise out of the
+floor, hold, and sink back, and touching one while it cycles is fatal;
+under some hovering platforms a colour-cycling **laser beam** reaches
+to the ground - walk into it and die, or cut it down with twenty-five
+laser bolts.  The power suit walks over mines and pumps unharmed, as
+on the Spectrum.  And seventy of the 125 zones send **flyers** after
+you - spheres, saucers and spinners on the original's six byte-coded
+paths, four-frame animated, each worth points to shoot down and fatal
+to the touch.
 
 A laser bolt shoots down what is in the air, destroys the moving
 enemies and pops the energy balls, but the gun emplacements and the
@@ -73,12 +89,13 @@ lands on.  It has a range, so judge the distance - thrown from too far
 back it is in the ground before it arrives.  Whatever you blow up, the
 explosion itself cannot hurt you.
 
-The pistol fires a single pixel, and it goes where you are looking: a
-wall gun's two barrels are two separate targets, and standing you can
-only cut down the upper stream and crouched only the lower.  The
-**power suit** is worth finding for more than the free hit it absorbs -
-it gives you two guns, eight pixels apart, firing a bolt you can
-actually see, and that takes down both streams at once.
+The pistol fires the original's six-pixel dash (the 0xBD pattern of
+0x82FC), and it goes where you are looking: a wall gun's two barrels
+are two separate targets, and standing you can only cut down the upper
+stream and crouched only the lower.  The **power suit** is worth
+finding for more than the free hit it absorbs - it fires from two
+barrels six pixels apart, as the original's does, and that takes down
+both streams at once.
 
 The white canisters refill the laser and the yellow ones the grenades:
 walk into them.  Standing in a teleport booth and pressing the up arrow
@@ -212,14 +229,12 @@ Resources are the source of truth.  Edit `src/res/zones/zones.txt`
 `src/res/objects/objects.txt` (the scenery byte code, one mnemonic per
 line), `src/res/tiles/tiles.txt` (`#` bitmaps),
 `src/res/sprites/*.txt` or `src/res/music/title.txt` and rebuild.
-`make extract` regenerates them from the tape, including frame 45 of
-`small.txt` (the power suit's bolt - the original drew the player's
-fire as a bare pattern and had no sprite for it)
-and frames 46..52, which are the grenade, the energy ball, the three
-sparks and a wall gun's shot, copied in from the original's *second*,
-16x8 sprite bank at 0xED40 - the port has one sprite format where the
-Spectrum had two.  Frame 45 is the power suit's own bolt, which has no
-original at all.
+`make extract` regenerates them from the tape, including frames
+46..52, which are the grenade, the energy ball, the three sparks and a
+wall gun's shot, copied in from the original's *second*, 16x8 sprite
+bank at 0xED40 - the port has one sprite format where the Spectrum had
+two - and frame 57, the laser bolt's dash, which the original drew as
+a bare bit pattern and never kept as a sprite.
 
 ## Credits
 

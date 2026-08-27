@@ -128,10 +128,6 @@ HUD_VALUES:	MOV	AMMO,R4		; ammo, two digits
 ; ------------------------------------------------------------------
 ; Print R4 as R5 decimal digits, right aligned, starting at column R1,
 ; with ink slot R2, on the value row.
-HN_VAL:		.WORD	0
-HN_COL:		.WORD	0
-HN_INK:		.WORD	0
-HN_CNT:		.WORD	0
 HUD_NUM:	MOV	R4,HN_VAL
 		MOV	R2,HN_INK
 		MOV	R5,HN_CNT

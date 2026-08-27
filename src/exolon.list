@@ -15,6 +15,7 @@ src/list.mac
 src/player.mac
 src/shots.mac
 src/enemy.mac
+src/anims.mac
 src/hud.mac
 src/input.mac
 src/gfx.mac

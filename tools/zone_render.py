@@ -99,6 +99,8 @@ def run_list(lists, lid, cells, row, col, ink=7, base=0, solid=1, hit=0,
             base = op[1]
         elif k == "solid":
             solid = op[1]
+        elif k == "anim":
+            pass                    # runtime hook: nothing on a still frame
         elif k == "hit":
             hit = op[1]
         elif k == "end":

@@ -107,7 +107,8 @@ def parse_list(mem, addr):
         elif op == 0xEA:
             ops.append(("hit", 0xFF))
         elif op == 0xEB:
-            addr += 1                     # animation hook: still frame only
+            ops.append(("anim", mem[addr]))  # runtime animation hook
+            addr += 1
         else:
             ops.append(("end",))
             return ops, calls, addr

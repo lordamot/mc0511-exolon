@@ -117,12 +117,10 @@ CD_P2:		MOVB	(R5)+,R1	; plane 2 only
 		ADD	#BUF_ROW,R3
 		SOB	R2,CD_P2
 		BR	CD_END
-CD_P3:		MOVB	(R5)+,R1	; both planes
-		BIC	#177400,R1
-		MOV	R1,R4
-		SWAB	R4
-		BIS	R4,R1
-		MOV	R1,(R3)
+CD_P3:		MOVB	(R5)+,R1	; both planes, through the same
+		BIC	#177400,R1	; table the sprite loop uses
+		ASL	R1
+		MOV	DUPTAB(R1),(R3)
 		ADD	#BUF_ROW,R3
 		SOB	R2,CD_P3
 CD_END:		RETURN
@@ -167,14 +165,6 @@ CLIPRECT:	TST	R0
 ; ------------------------------------------------------------------
 ; Expand a rectangle of cells: R0 = row, R1 = col, R2 = width,
 ; R3 = height.  Clobbers everything.
-CRW:		.WORD	0
-CRW0:		.WORD	0
-CRH:		.WORD	0
-CRC:		.WORD	0
-CRC0:		.WORD	0
-CRB:		.WORD	0
-CRB0:		.WORD	0
-
 CELL_RECT:	CALL	CLIPRECT
 		BEQ	9$
 		MOV	R3,CRH
@@ -216,18 +206,21 @@ BLIT_CELLS:	MOV	R2,-(SP)
 		MOV	(SP)+,R1
 		MOV	#176640,R4
 		MOV	#176642,R5
-		MOV	#8.,R0
+		MOV	#8.,-(SP)	; lines
 1$:		MOV	R1,-(SP)
 		MOV	R2,-(SP)
-		MOV	R3,@R4
-2$:		MOV	(R2)+,@R5
-		INC	@R4
+		MOV	R3,R0		; the address advances in a register:
+2$:		MOV	R0,@R4		; writing it costs one I/O access
+		INC	R0		; where INCing the register cost two
+		MOV	(R2)+,@R5
 		SOB	R1,2$
 		MOV	(SP)+,R2
 		MOV	(SP)+,R1
 		ADD	#BUF_ROW,R2
 		ADD	#VLINE,R3
-		SOB	R0,1$
+		DEC	@SP
+		BNE	1$
+		TST	(SP)+
 		RETURN
 
 ; ------------------------------------------------------------------
@@ -332,7 +325,10 @@ SPR_SMALL:	MOV	R0,R4
 		MOV	#16.,R5
 1$:		MOV	#2,TMPA
 
-SPR_GO:		MOV	R1,R3		; shift = (x & 3) * 2
+SPR_GO:		TST	DRAWOFF		; a catch-up pass draws nothing -
+		BEQ	32$		; the blitted frame after it does
+		RETURN
+32$:		MOV	R1,R3		; shift = (x & 3) * 2
 		BIC	#177774,R3
 		ASL	R3
 		MOV	R3,SPRSHIFT
@@ -341,8 +337,10 @@ SPR_GO:		MOV	R1,R3		; shift = (x & 3) * 2
 		MOV	#NCOLS,R3	; cells we may touch
 		SUB	R1,R3
 		MOV	TMPA,R4
+		TST	SPRSHIFT	; aligned: the extra cell the shift
+		BEQ	31$		; could spill into is never lit
 		INC	R4		; width in cells = bytes + 1
-		CMP	R3,R4
+31$:		CMP	R3,R4
 		BLOS	1$
 		MOV	R4,R3
 1$:		MOV	R3,TMPB		; cells to write per line
@@ -384,7 +382,12 @@ SPR_LINE:	CMP	R3,#BUF
 		BNE	1$
 		MOVB	(R4)+,R1	; R1 = source byte 2
 		BIC	#177400,R1
-1$:		TST	SPRMIR
+1$:		TST	R0		; a blank line costs nothing more
+		BNE	11$		; than these tests (explosion and
+		TST	R1		; spark frames are half empty)
+		BNE	11$
+		JMP	SPR_NEXT
+11$:		TST	SPRMIR
 		BEQ	2$
 		CALL	SPR_FLIP
 2$:		MOV	SPRSHIFT,R2	; slide it into place
@@ -498,7 +501,9 @@ SPR_FLIP:	MOV	R0,R2
 ; The row's sprite slot picks the colour, exactly as for a sprite.
 PIXW:		.WORD	401,2004,10020,40100	; bit pair, both planes
 
-PIX_DRAW:	CMP	R2,#192.
+PIX_DRAW:	TST	DRAWOFF
+		BNE	9$
+		CMP	R2,#192.
 		BHIS	9$
 		CMP	R1,#128.
 		BHIS	9$

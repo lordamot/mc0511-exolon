@@ -10,6 +10,10 @@ developed and checked.  Both drivers are Python and live in `tools/`.
 one - the emulator understands:
 
     run N                 run N frames
+    runrel ADDR N [MAX]   run until the CPU word at octal ADDR has
+                          advanced by N (decimal) - with BENCHF from
+                          build/exolon.lst this is "run the game
+                          exactly N frames", however slow the zone
     press CODE [HOLD]     press and release an octal UKNC scancode
     keydown CODE          hold a key
     keyup CODE            release it
@@ -37,10 +41,18 @@ A session always starts with the firmware loader:
 Zone loading takes about eight frames (a full expand plus a full blit),
 so give it `run 40` before screenshotting after forcing a zone.
 
-Useful pokes - the addresses come out of `build/exolon.lst`:
+Useful pokes - the addresses come out of `build/exolon.lst` (they move
+with every gamevars change, so always look them up):
 
-    pokecpu 0146164 36 0     ; ZONE = 30
-    pokecpu 0146166 1 0      ; ZONELOAD: reload it now
+    pokecpu <ZONE> 36 0      ; ZONE = 30
+    pokecpu <ZONELOAD> 1 0   ; reload it now
+    pokecpu <CHEAT> 2 0      ; 2 = invulnerable (testing aid; the menu
+                             ; only ever sets 1 = infinite lives)
+
+The game runs update passes without drawing when it falls behind
+(frame-skip), so a memory dump taken at a tick boundary can catch the
+back buffer between passes.  A test that compares pixels should press
+АР2 first - pause always freezes a fully drawn frame - and dump then.
 
 Two things that are easy to get wrong:
 

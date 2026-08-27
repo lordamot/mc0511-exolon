@@ -22,6 +22,7 @@ ZONE_LOAD:	CLR	ZONELOAD
 		CLR	NSUITP
 		CLR	NMINE
 		CLR	NEMIT
+		CLR	HOOKN		; anim hooks are refiled by the lists
 		CALL	ENTS_CLEAR	; also disarms the zone's rocket
 		MOV	ZONE,R0
 		ASL	R0
@@ -57,6 +58,8 @@ ZONE_LOAD:	CLR	ZONELOAD
 		BR	10$
 
 20$:		CALL	SPEC_SCAN		; teleport pads, suit booths
+		CALL	ANIMS_INIT		; flames, mines, pumps, the
+						; beam, arcs, flyers
 		CALL	HUD_INIT
 		CALL	ROW_PALETTES
 		MOV	#2,R0			; PPU: reload the row palettes
@@ -164,7 +167,15 @@ SPEC_SCAN:	CLR	R1			; how many force fields first,
 		INC	R4
 		CMP	R4,#PLAYROWS
 		BLO	6$
-		CALL	BALL_SHARE
+		MOV	HOOKN,R4	; the pylons' free-ball cells (class 9
+		BEQ	12$		; through an anim hook) share the same
+		MOV	#HOOKS,R3	; budget
+11$:		CMPB	(R3),#CL_FIELD
+		BNE	13$
+		INC	R1
+13$:		ADD	#3,R3
+		SOB	R4,11$
+12$:		CALL	BALL_SHARE
 
 		CLR	R4			; row
 1$:		CLR	R3			; column
@@ -416,9 +427,6 @@ ROW_PALWORDS:	ASL	R0
 		MOV	R2,ROWPALS+2(R0)
 		RETURN
 
-ROWTMP:		.WORD	0
-
-; ------------------------------------------------------------------
 ; Sprites want white.  If the row's third ink is only a detail colour
 ; (less than a quarter of the row's pixels) its slot goes to white, so
 ; the player shows white almost everywhere; a row whose third ink is a

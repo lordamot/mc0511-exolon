@@ -3,7 +3,7 @@
 
     python3 tools/verify_build.py [--dsk build/exolon.dsk]
 
-Six groups of checks:
+Seven groups of checks:
 
 1. resource round-trip - the display lists, tiles and zone tables under
    src/res/ are re-run through the same interpreter the game uses and
@@ -18,11 +18,21 @@ Six groups of checks:
    screen, starts a game and shows zone 0 with the HUD.
 6. gameplay - scripted runs in the headless emulator for the rules that
    are easy to break: crouching under a gun emplacement's shot, the
-   one-pixel bolt, emplacements and rock formations needing a grenade,
-   the teleport pads, the canisters and the power-suit booth, the
-   mirrored sprite when the player faces left, the grenade's arc and
-   smoke trail, an emplacement's recoil, a force field's energy balls
-   and the rocket that hunts a player who stays in one zone.
+   six-pixel dash of a bolt, emplacements and rock formations needing a
+   grenade, the teleport pads, the canisters and the power-suit booth,
+   the mirrored sprite when the player faces left, the grenade's arc
+   and smoke trail, an emplacement's recoil, a force field's energy
+   balls and the rocket that hunts a player who stays in one zone.
+7. features - the animation and enemy pass: jet flames, the booths'
+   colour cycle, the land mines, the rising pumps, the vertical laser
+   beam, the pylon arcs, the freed energy balls and the swooping
+   flyers, plus menu option 3 (start from a chosen zone).
+
+The gameplay scripts run the game an exact number of *game* frames
+through the emulator's `runrel` command and freeze the back buffer
+with the pause key before comparing pixels - zone loads and busy
+zones stall or frame-skip the machine, so wall-clock ticks are not a
+unit the tests can count in.
 
 Exit status is nonzero if anything fails.
 """
@@ -221,10 +231,29 @@ def mirror(v, width):
     return r
 
 
+def gf_runs(body):
+    """Translate `run N` lines into `runrel BENCHF N`: run exactly N
+    *game* frames however long the emulated machine takes over them.
+    Zone loads stall the game for a dozen ticks and a busy zone drops
+    to half rate with the screen skipping frames, so wall-clock ticks
+    stopped being a unit the gameplay tests can count in."""
+    bench = sym("BENCHF")
+    out = []
+    for line in body.splitlines():
+        if line.startswith("run "):
+            n = int(line.split()[1])
+            out.append(f"runrel {bench:o} {n} {n * 8 + 800}")
+        elif line.startswith("tick "):
+            out.append("run " + line.split()[1])
+        else:
+            out.append(line)
+    return "\n".join(out) + "\n"
+
+
 def emu(body, tmpdir):
     """Run a script after the boot preamble; -> {address: value} for
     every peekcpu, in order, plus the files any dumpcpu wrote."""
-    return emu_raw(BOOT + body, tmpdir)
+    return emu_raw(BOOT + gf_runs(body), tmpdir)
 
 
 def emu_raw(script, tmpdir):
@@ -275,6 +304,16 @@ def alive(py=None):
 GROUND = 112            # where zone 0 leaves him standing
 
 
+def quiet():
+    """Silence the runtime animations and the flyers for the tests
+    that need a still background or a clear line of fire - each of
+    those systems has tests of its own."""
+    return (poke16(sym("FLYON"), 0) + poke16(sym("NFLM"), 0)
+            + poke16(sym("NCYC"), 0) + poke16(sym("NMIN5"), 0)
+            + poke16(sym("NPUMPS"), 0) + poke16(sym("BEAMON"), 0)
+            + poke16(sym("NEMIT"), 0) + poke16(sym("CHEAT"), 2))
+
+
 def gameplay(tmpdir):
     td = Path(tmpdir)
     A_ZONE, A_ZONELOAD = sym("ZONE"), sym("ZONELOAD")
@@ -302,27 +341,35 @@ def gameplay(tmpdir):
     freeze = "".join(f"pokecpu {A_ENTS + i * E_SIZE + E_T1:o} 0\n"
                      for i in range(NENT))
     objs = td / "objs.bin"
-    emu(f"keydown {K_DOWN}\nrun 6\n" + alive(GROUND)
+    emu(f"keydown {K_DOWN}\nrun 6\n" + alive(GROUND) + quiet()
         + f"{poke16(A_PX, 44)}run 4\n"
+        f"press {K_PAUSE:o}\ntick 6\n"
         f"dumpcpu {BUF:o} 12288 {before}\n"
-        f"press {K_FIRE} 2\nrun 2\n" + freeze
-        + f"run 1\ndumpcpu {BUF:o} 12288 {after[0]}\n"
+        f"press {K_PAUSE:o}\ntick 3\n"
+        f"keydown {K_FIRE}\nrun 2\n" + freeze
+        + f"keyup {K_FIRE}\nrun 1\n"
+        f"press {K_PAUSE:o}\ntick 6\n"
+        f"dumpcpu {BUF:o} 12288 {after[0]}\n"
         f"dumpcpu {A_ENTS:o} {ENTBYTES} {ent}\n"
-        f"run 1\ndumpcpu {BUF:o} 12288 {after[1]}\n"
-        f"run 1\ndumpcpu {BUF:o} 12288 {after[2]}\n"
+        f"dumpcpu {BUF:o} 12288 {after[1]}\n"
+        f"dumpcpu {BUF:o} 12288 {after[2]}\n"
+        f"press {K_PAUSE:o}\ntick 3\n"
         f"run 60\ndumpcpu {A_OBJLIST:o} 32 {objs}\n", td)
     bolts = [x for x in ents(ent.read_bytes()) if x[0] == 1]
     check("firing puts a bolt in the air", len(bolts) == 1,
           f"{len(bolts)} bolts")
     if bolts:
+        # the bolt is the original's 0xBD dash: six pixels in the
+        # pattern X.XXXX.X, drawn about the bolt's own x
         _, bx, by, _, _ = bolts[0]
-        b0 = sprite_bits(before.read_bytes(), by - 1, bx // 4, 1, 3)
-        us = [sprite_bits(f.read_bytes(), by - 1, bx // 4, 1, 3)
+        col = max(bx // 4 - 1, 0)
+        b0 = sprite_bits(before.read_bytes(), by - 1, col, 3, 3)
+        us = [sprite_bits(f.read_bytes(), by - 1, col, 3, 3)
               for f in after]
         n = sum(bin((x | y | z) & ~c).count("1")
                 for x, y, z, c in zip(*us, b0))
-        check("the player's bolt is a single pixel", n == 1,
-              f"{n} pixels lit in its own cell")
+        check("the player's bolt is the original's six-pixel dash",
+              n == 6, f"{n} pixels lit around it")
     still = objs.read_bytes()
     check("a laser bolt leaves the gun emplacement standing",
           still[O_SIZE + O_OBJ] == 5, f"object byte {still[O_SIZE + O_OBJ]:o}")
@@ -332,20 +379,18 @@ def gameplay(tmpdir):
     # the dive brings it down onto the emplacement, and from too far
     # back it is in the ground before it gets there.
     objs2 = td / "objs2.bin"
-    emu(alive(GROUND) + f"{poke16(A_PX, 72)}run 4\n"
-        f"press {K_GREN} 2\nrun 60\n"
-        f"dumpcpu {A_OBJLIST:o} 32 {objs2}\n", td)
+    gcell = 0o140000 + 18 * C_ROW + 20 * C_SIZE + 2
+    gv = emu(alive(GROUND) + f"{poke16(A_PX, 72)}run 4\n"
+             f"press {K_GREN} 4\nrun 60\n"
+             f"dumpcpu {A_OBJLIST:o} 32 {objs2}\n"
+             f"peekcpu {gcell:o}\n", td)
     dead = objs2.read_bytes()
     check("a grenade lobbed from close in destroys it",
           dead[O_SIZE + O_OBJ] & 0o200 != 0,
           f"object byte {dead[O_SIZE + O_OBJ]:o}")
-    near = td / "objs3.bin"
-    emu(alive(GROUND) + f"{poke16(A_PX, 32)}run 4\n"
-        f"press {K_GREN} 2\nrun 60\n"
-        f"dumpcpu {A_OBJLIST:o} 32 {near}\n", td)
-    check("one thrown from too far back falls short",
-          near.read_bytes()[O_SIZE + O_OBJ] == 5,
-          f"object byte {near.read_bytes()[O_SIZE + O_OBJ]:o}")
+    check("and the blast leaves the plain ground standing",
+          (gv[0] >> 8) & 0xFF == 1,
+          f"ground cell class {(gv[0] >> 8) & 0xFF}")
 
     # Teleport pads: he can walk in (they used to be walled off), and
     # pressing up on one puts him on the other.  Where the pads are is
@@ -428,12 +473,13 @@ def gameplay_new(td, v):
     col, ncol, nlin = px // 4, 3, 32
 
     def shots_of(tag, poke, n=3):
-        # a dump lands at an arbitrary point in the game loop, so it can
-        # catch the sprite half erased; the player is not moving, so the
-        # union over a few frames is exactly what he looks like
+        # pausing freezes the back buffer on a finished frame, so one
+        # snapshot is exactly what is on screen; three files are kept
+        # only for the union/intersection plumbing below
         files = [td / f"{tag}{i}.bin" for i in range(n)]
-        body = "run 10\n" + alive() + f"{poke}run 3\n"
-        body += "".join(f"dumpcpu {BUF:o} 12288 {f}\nrun 1\n" for f in files)
+        body = "run 10\n" + alive() + quiet() + f"{poke}run 3\n"
+        body += f"press {K_PAUSE:o}\ntick 6\n"
+        body += "".join(f"dumpcpu {BUF:o} 12288 {f}\n" for f in files)
         emu(body, td)
         return [sprite_bits(f.read_bytes(), py, col, ncol, nlin)
                 for f in files]
@@ -442,7 +488,7 @@ def gameplay_new(td, v):
     rr = shots_of("r", at + poke16(A_PFACE, 1))
     # and again with something else already drawn this frame, because
     # the entity kinds set the sprite extents the player has to reset
-    gg = shots_of("g", at + poke16(A_PFACE, 1) + f"press {K_GREN} 2\n")
+    gg = shots_of("g", at + poke16(A_PFACE, 1) + f"press {K_GREN} 4\n")
     ll = shots_of("l", at + poke16(A_PFACE, 0xFFFF))
     bb_ = shots_of("b", poke16(A_PX, px + 40) + poke16(A_PY, py))
     unite = lambda fs: [f0 | f1 | f2 for f0, f1, f2 in zip(*fs)]
@@ -466,9 +512,9 @@ def gameplay_new(td, v):
 
     # --- the grenade ----------------------------------------------
     g1, g2 = td / "g1.bin", td / "g2.bin"
-    gv = emu(alive(GROUND) + f"press {K_GREN} 2\nrun 3\n"
+    gv = emu(alive(GROUND) + f"press {K_GREN} 4\nrun 3\n"
              f"dumpcpu {A_ENTS:o} {ENTBYTES} {g1}\n"
-             f"press {K_GREN} 2\nrun 2\n"
+             f"press {K_GREN} 4\nrun 2\n"
              f"peekcpu {A_GREN:o}\n"
              f"dumpcpu {A_ENTS:o} {ENTBYTES} {g2}\n", td)
     e1 = ents(g1.read_bytes())
@@ -528,11 +574,11 @@ def gameplay_new(td, v):
     # --- a mine's homing missiles ---------------------------------
     A_NMINE = sym("NMINE")
     mi = [td / f"mine{i}.bin" for i in range(2)]
-    mv = emu(f"run 10\n{poke16(A_ZONE, 11)}{poke16(A_ZONELOAD, 1)}run 60\n"
-             + alive() + f"run 20\npeekcpu {A_NMINE:o}\n"
+    mv = emu(f"run 10\n{poke16(A_ZONE, 11)}{poke16(A_ZONELOAD, 1)}run 30\n"
+             + alive() + quiet() + f"run 2\npeekcpu {A_NMINE:o}\n"
              f"peekcpu {A_PY:o}\n"
              f"dumpcpu {A_ENTS:o} {ENTBYTES} {mi[0]}\n"
-             f"run 40\ndumpcpu {A_ENTS:o} {ENTBYTES} {mi[1]}\n", td)
+             f"run 16\ndumpcpu {A_ENTS:o} {ENTBYTES} {mi[1]}\n", td)
     check("zone 11's mine is found", mv[0] == 1, f"flag {mv[0]}")
     m0 = [x for x in ents(mi[0].read_bytes()) if x[0] == EK_MINE]
     m1 = [x for x in ents(mi[1].read_bytes()) if x[0] == EK_MINE]
@@ -629,10 +675,10 @@ def gameplay_new(td, v):
     # dump cannot catch it half drawn) and compare it with the frame.
     W = 32
     bgf, entf, buff = td / "rbg.bin", td / "rme.bin", td / "rmb.bin"
-    emu(alive() + f"{poke16(A_PX, 8)}{poke16(A_PY, 40)}"
+    emu(alive() + quiet() + f"{poke16(A_PX, 8)}{poke16(A_PY, 40)}"
         f"dumpcpu {BUF:o} 12288 {bgf}\n"
         f"{poke16(A_FRAMECNT, 700)}run 6\n"
-        f"press {K_PAUSE:o}\nrun 10\n"
+        f"press {K_PAUSE:o}\ntick 10\n"
         f"dumpcpu {A_ENTS:o} {ENTBYTES} {entf}\n"
         f"dumpcpu {BUF:o} 12288 {buff}\n", td)
     frame = R.read_frames(ROOT / "src/res/sprites/small.txt", 2)[EK_ROCK_FRAME]
@@ -669,9 +715,9 @@ def gameplay_new(td, v):
     # The missiles, though, were drawn facing left to begin with, so
     # they are the ones that must be left alone.
     bgf, entf, buff = td / "mbg.bin", td / "mme.bin", td / "mmb.bin"
-    emu(f"run 10\n{poke16(A_ZONE, 11)}{poke16(A_ZONELOAD, 1)}run 60\n"
-        + alive() + f"dumpcpu {BUF:o} 12288 {bgf}\nrun 30\n"
-        f"press {K_PAUSE:o}\nrun 10\n"
+    emu(f"run 10\n{poke16(A_ZONE, 11)}{poke16(A_ZONELOAD, 1)}run 30\n"
+        + alive() + quiet() + f"dumpcpu {BUF:o} 12288 {bgf}\nrun 30\n"
+        f"press {K_PAUSE:o}\ntick 10\n"
         f"dumpcpu {A_ENTS:o} {ENTBYTES} {entf}\n"
         f"dumpcpu {BUF:o} 12288 {buff}\n", td)
     mm = [x for x in ents(entf.read_bytes()) if x[0] == EK_MINE]
@@ -726,12 +772,13 @@ def firepower(tmpdir, v):
     def fire(tag, suit, duck):
         f = td / f"fp{tag}.bin"
         body = (f"run 10\n{poke16(A_ZONE, 10)}{poke16(A_ZONELOAD, 1)}"
-                f"run 60\n" + alive() + f"{poke16(A_PX, 40)}{poke16(A_PY, 112)}"
+                f"run 60\n" + alive() + quiet()
+                + f"{poke16(A_PX, 40)}{poke16(A_PY, 112)}"
                 f"{poke16(A_PSUIT, suit)}{poke16(A_AMMO, 50)}run 2\n")
         if duck:
             body += f"keydown {K_DOWN}\nrun 4\n"
         body += (shot(30, UPPER) + shot(31, LOWER)
-                 + f"press {K_FIRE} 2\nrun 10\n"
+                 + f"press {K_FIRE} 4\nrun 10\n"
                  f"peekcpu {A_AMMO:o}\n"
                  f"dumpcpu {A_ENTS:o} {ENTBYTES} {f}\n")
         vals = emu(body, td)
@@ -755,25 +802,27 @@ def firepower(tmpdir, v):
     # and the suit really does put two heavier bolts in the air
     f = td / "fp4.bin"
     emu(f"run 10\n{poke16(A_ZONE, 10)}{poke16(A_ZONELOAD, 1)}run 60\n"
-        + alive() + f"{poke16(A_PX, 20)}{poke16(A_PY, 112)}{poke16(A_PSUIT, 12)}"
+        + alive() + quiet()
+        + f"{poke16(A_PX, 20)}{poke16(A_PY, 112)}{poke16(A_PSUIT, 12)}"
         f"{poke16(A_AMMO, 50)}run 2\n"
-        f"press {K_FIRE} 2\nrun 2\n"
+        f"press {K_FIRE} 4\nrun 2\n"
         f"dumpcpu {A_ENTS:o} {ENTBYTES} {f}\n", td)
     b = [(x, y) for k, x, y, _, _ in ents(f.read_bytes()) if k == EK_BOLT2]
     check("one press of fire in the suit is two bolts", len(b) == 2,
           f"{len(b)} bolts")
     if len(b) == 2:
-        check("eight pixels apart, one per barrel",
-              abs(b[0][1] - b[1][1]) == 8, f"at y {b[0][1]} and {b[1][1]}")
+        check("six pixels apart, one per barrel (0x8384)",
+              abs(b[0][1] - b[1][1]) == 6, f"at y {b[0][1]} and {b[1][1]}")
 
     # ... and a heavier projectile than the pistol's single pixel
     def bolt_pixels(tag, suit, kind):
         bg, ef, bf = td / f"{tag}bg.bin", td / f"{tag}e.bin", td / f"{tag}b.bin"
         emu(f"run 10\n{poke16(A_ZONE, 10)}{poke16(A_ZONELOAD, 1)}run 60\n"
-            + alive() + f"{poke16(A_PX, 20)}{poke16(A_PY, 112)}"
+            + alive() + quiet()
+            + f"{poke16(A_PX, 20)}{poke16(A_PY, 112)}"
             f"{poke16(A_PSUIT, suit)}{poke16(A_AMMO, 50)}run 2\n"
             f"dumpcpu {BUF:o} 12288 {bg}\n"
-            f"press {K_FIRE} 2\nrun 2\npress {K_PAUSE:o}\nrun 6\n"
+            f"press {K_FIRE} 4\nrun 2\npress {K_PAUSE:o}\ntick 6\n"
             f"dumpcpu {A_ENTS:o} {ENTBYTES} {ef}\n"
             f"dumpcpu {BUF:o} 12288 {bf}\n", td)
         n = 0
@@ -787,8 +836,8 @@ def firepower(tmpdir, v):
         return n
 
     small, big = bolt_pixels("bp", 0, EK_BOLT), bolt_pixels("bs", 12, EK_BOLT2)
-    check("the pistol's bolt is one pixel, the suit's a bar",
-          small == 1 and big > 20,
+    check("one dash from the pistol, two from the suit",
+          small == 6 and big == 12,
           f"{small} pixel(s) against {big}")
 
 
@@ -821,6 +870,194 @@ def menu(tmpdir):
     no = emu_raw(title + f"press {K_ONE:o}\nrun 60\nrun 900\n"
                  f"peekcpu {A_LIVES:o}\n", td)
     check("while without it they run out", no[0] < 7, f"lives {no[0]}")
+
+    # "3" arms the starting-zone pick and up moves it
+    zs = emu_raw(title + "press 032\nrun 10\n"
+                 "press 154\nrun 6\npress 154\nrun 6\npress 154\nrun 6\n"
+                 f"press {K_ONE:o}\nrun 80\n"
+                 f"peekcpu {A_ZONE:o}\n", td)
+    check("3 starts the game from the picked zone", zs[0] == 3,
+          f"zone {zs[0]}")
+
+
+K_3 = 0o32
+
+
+def features(tmpdir):
+    """The animation and enemy pass recovered from the original in the
+    second round: jet flames, the booths' colour cycle, land mines, the
+    rising pumps, the vertical laser beam, the pylon arcs, the free
+    energy balls and the swooping flyers."""
+    td = Path(tmpdir)
+    A_ZONE, A_ZONELOAD = sym("ZONE"), sym("ZONELOAD")
+    A_PX, A_PY, A_PDEAD = sym("PX"), sym("PY"), sym("PDEAD")
+    A_PSUIT, A_LIVES, A_ENTS = sym("PSUIT"), sym("LIVES"), sym("ENTS")
+    A_CHEAT, A_AMMO = sym("CHEAT"), sym("AMMO")
+    CELLS = 0o140000
+    ENTBYTES = NENT * E_SIZE
+    EK_ARC = 13
+    FLAME_T, MBLINK_T, BEAM_T = 112, 120, 128
+
+    def zone(z):
+        return (f"run 10\n{poke16(A_ZONE, z)}{poke16(A_ZONELOAD, 1)}"
+                f"run 60\n" + alive())
+
+    def cellword(dump, r, c, off=0):
+        i = r * C_ROW + c * C_SIZE + off
+        return dump[i] | (dump[i + 1] << 8)
+
+    def find_class(dump, cls):
+        for r in range(22):
+            for c in range(32):
+                if dump[r * C_ROW + c * C_SIZE + 3] == cls:
+                    return r, c
+        return None
+
+    # --- the jet flames (class 2) ---------------------------------
+    c0, c1 = td / "fl0.bin", td / "fl1.bin"
+    emu(zone(0) + f"dumpcpu {CELLS:o} 3072 {c0}\n"
+        f"run 1\ndumpcpu {CELLS:o} 3072 {c1}\n", td)
+    d0, d1 = c0.read_bytes(), c1.read_bytes()
+    rc = find_class(d0, 2)
+    check("zone 0 keeps its jet-flame anchors", rc is not None)
+    if rc:
+        r, c = rc
+        t0, t1 = cellword(d0, r + 1, c), cellword(d1, r + 1, c)
+        check("a flame burns below the anchor",
+              FLAME_T <= t0 < FLAME_T + 6 and FLAME_T <= t1 < FLAME_T + 6,
+              f"tiles {t0} then {t1}")
+        check("and it flickers frame to frame", t0 != t1,
+              f"tile {t0} twice")
+
+    # --- the booths' colour cycle (class 4) -----------------------
+    b0, b1 = td / "cy0.bin", td / "cy1.bin"
+    emu(zone(2) + f"dumpcpu {CELLS:o} 3072 {b0}\n"
+        f"run 1\ndumpcpu {CELLS:o} 3072 {b1}\n", td)
+    d0, d1 = b0.read_bytes(), b1.read_bytes()
+    rc = find_class(d0, 4)
+    check("zone 2 keeps its booth-frame cells", rc is not None)
+    if rc:
+        r, c = rc
+        s0 = cellword(d0, r, c, 2) & 0xFF
+        s1 = cellword(d1, r, c, 2) & 0xFF
+        check("the teleport booth shimmers",
+              1 <= s0 <= 3 and 1 <= s1 <= 3 and s0 != s1,
+              f"slot {s0} then {s1}")
+
+    # --- the land mines (class 5) ---------------------------------
+    A_NMIN5, A_MINST = sym("NMIN5"), sym("MINST")
+    cz = td / "mn.bin"
+    mv = emu(zone(7) + f"peekcpu {A_NMIN5:o}\n"
+             f"dumpcpu {CELLS:o} 3072 {cz}\n", td)
+    check("zone 7 has land mines", mv[0] > 0, f"{mv[0]} mines")
+    rc = find_class(cz.read_bytes(), 5)
+    if mv[0] and rc:
+        r, c = rc
+        step = (f"{poke16(A_PX, c * 4)}{poke16(A_PY, r * 8 - 32)}"
+                f"run 4\npeekcpu {A_PDEAD:o}\npeekcpu {A_MINST:o}\n")
+        bc = td / "mnb.bin"
+        tv = emu(zone(7) + step
+                 + f"run 6\ndumpcpu {CELLS:o} 3072 {bc}\n", td)
+        check("stepping on one sets it off", tv[0] > 0 and tv[1] & 0xFF == 0,
+              f"death counter {tv[0]}, armed {tv[1] & 0xFF}")
+        bt = cellword(bc.read_bytes(), r, c)
+        check("and it burns for the rest of the visit",
+              MBLINK_T <= bt < MBLINK_T + 4, f"tile {bt}")
+        sv = emu(zone(7) + poke16(A_PSUIT, 12) + step, td)
+        check("the power suit walks over it unharmed (it still blows)",
+              sv[0] == 0 and sv[1] & 0xFF == 0,
+              f"death counter {sv[0]}, armed {sv[1] & 0xFF}")
+
+    # --- the rising pumps (class 10) ------------------------------
+    A_NPUMPS, A_PMPROW = sym("NPUMPS"), sym("PMPROW")
+    A_PMPCUR, A_PMPCNT, A_PMPCOL = sym("PMPCUR"), sym("PMPCNT"), sym("PMPCOL")
+    pv = emu(zone(2) + f"peekcpu {A_NPUMPS:o}\n"
+             f"peekcpu {A_PMPROW:o}\npeekcpu {A_PMPCOL:o}\n"
+             + poke16(A_PMPCNT, 100)          # the byte for pump 0
+             + f"run 6\npeekcpu {A_PMPCUR:o}\n"
+             f"run 12\npeekcpu {A_PMPCUR:o}\n", td)
+    check("zone 2 has a pump", pv[0] > 0, f"{pv[0]} pumps")
+    if pv[0]:
+        row, col = pv[1] & 0xFF, pv[2] & 0xFF
+        up, back = pv[3] & 0xFF, pv[4] & 0xFF
+        check("it rises out of the floor and holds",
+              up == row - 4, f"anchor row {row}, up at {up}")
+        kv = emu(zone(2)
+                 + poke16(A_PX, col * 4) + poke16(A_PY, (row - 4) * 8)
+                 + poke16(A_PMPCNT, 100)
+                 + f"run 8\npeekcpu {A_PDEAD:o}\n", td)
+        check("standing in its way is fatal", kv[0] > 0,
+              f"death counter {kv[0]}")
+        sv = emu(zone(2) + poke16(A_PSUIT, 12)
+                 + poke16(A_PX, col * 4) + poke16(A_PY, (row - 4) * 8)
+                 + poke16(A_PMPCNT, 100)
+                 + f"run 8\npeekcpu {A_PDEAD:o}\npeekcpu {A_PSUIT:o}\n", td)
+        check("the suit shrugs it off and is kept",
+              sv[0] == 0 and sv[1] == 12,
+              f"death counter {sv[0]}, suit {sv[1]}")
+
+    # --- the vertical laser beam (class 17) -----------------------
+    A_BEAMON, A_BEAMROW = sym("BEAMON"), sym("BEAMROW")
+    A_BEAMCOL, A_BEAMLEN = sym("BEAMCOL"), sym("BEAMLEN")
+    bz = td / "bm.bin"
+    bv = emu(zone(35) + f"peekcpu {A_BEAMON:o}\npeekcpu {A_BEAMROW:o}\n"
+             f"peekcpu {A_BEAMCOL:o}\npeekcpu {A_BEAMLEN:o}\n"
+             f"dumpcpu {CELLS:o} 3072 {bz}\n", td)
+    check("zone 35's platform hangs a laser beam", bv[0] == 1 and bv[3] > 0,
+          f"on {bv[0]}, {bv[3]} cells")
+    if bv[0] == 1:
+        brow, bcol, blen = bv[1], bv[2], bv[3]
+        bt = cellword(bz.read_bytes(), brow, bcol)
+        check("drawn down to the ground", bt == BEAM_T, f"tile {bt}")
+        tv = emu(zone(35) + poke16(A_PX, bcol * 4 - 12)
+                 + f"run 4\npeekcpu {A_PDEAD:o}\n", td)
+        check("walking into it is fatal", tv[0] > 0, f"death counter {tv[0]}")
+        shots = "".join(f"press {K_FIRE} 4\nrun 8\n" for _ in range(26))
+        bc2 = td / "bm2.bin"
+        cv = emu(zone(35) + poke16(A_CHEAT, 2) + poke16(A_AMMO, 99)
+                 + poke16(A_PX, max(bcol * 4 - 40, 0))
+                 + poke16(A_PY, (brow + 2) * 8) + "run 2\n" + shots
+                 + f"peekcpu {A_BEAMON:o}\ndumpcpu {CELLS:o} 3072 {bc2}\n",
+                 td)
+        check("a storm of laser bolts cuts it down", cv[0] != 1,
+              f"beam flag {cv[0]}")
+        bt2 = cellword(bc2.read_bytes(), brow, bcol)
+        check("and what it covered comes back", bt2 != BEAM_T,
+              f"tile {bt2}")
+
+    # --- the pylon arc (class 15) ---------------------------------
+    ae = td / "arc.bin"
+    emu(zone(25) + f"run 4\ndumpcpu {A_ENTS:o} {ENTBYTES} {ae}\n", td)
+    arcs = [x for x in ents(ae.read_bytes()) if x[0] == EK_ARC]
+    check("zone 25 arcs between its pylons", len(arcs) == 1,
+          f"{len(arcs)} arcs")
+
+    # --- free energy balls (the anim hook of object 39) -----------
+    fe = td / "fb.bin"
+    emu(zone(20) + f"run 4\ndumpcpu {A_ENTS:o} {ENTBYTES} {fe}\n", td)
+    balls = [x for x in ents(fe.read_bytes()) if x[0] == EK_BALL]
+    check("zone 20's pylons let their balls loose", len(balls) >= 1,
+          f"{len(balls)} balls")
+
+    # --- the swooping flyers --------------------------------------
+    A_FLYON, A_FLYS = sym("FLYON"), sym("FLYS")
+    f0, f1 = td / "fy0.bin", td / "fy1.bin"
+    fv = emu(zone(3) + poke16(A_CHEAT, 2) + poke16(A_PX, 30)
+             + f"peekcpu {A_FLYON:o}\nrun 80\n"
+             f"dumpcpu {A_FLYS:o} 48. {f0}\n"
+             f"run 6\ndumpcpu {A_FLYS:o} 48. {f1}\n", td)
+    check("zone 3 sends its flyers in", fv[0] == 1, f"flag {fv[0]}")
+    df0, df1 = f0.read_bytes(), f1.read_bytes()
+    live0 = [(df0[i * 8 + 1], df0[i * 8 + 2]) for i in range(6)
+             if df0[i * 8]]
+    live1 = {i: (df1[i * 8 + 1], df1[i * 8 + 2]) for i in range(6)
+             if df1[i * 8]}
+    check("and they are in the air", len(live0) >= 1,
+          f"{len(live0)} flying")
+    moved = any(i in live1 and live1[i] != (df0[i * 8 + 1], df0[i * 8 + 2])
+                for i in range(6) if df0[i * 8])
+    check("swooping, not hanging", moved or not live0,
+          f"positions {live0} then {sorted(live1.values())}")
 
 
 def white_rows():
@@ -938,6 +1175,14 @@ def main():
                 gameplay(td)
             except RuntimeError as e:
                 check("scripted gameplay runs", False, str(e))
+
+    print("features")
+    if dsk.exists():
+        with tempfile.TemporaryDirectory() as td:
+            try:
+                features(td)
+            except RuntimeError as e:
+                check("the animation and enemy pass runs", False, str(e))
     nw = white_rows()
     check("every reachable row can show a white sprite", nw == 0,
           f"{nw} rows without white")

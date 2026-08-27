@@ -442,3 +442,55 @@ object.  Anything that stands in for it has to be uncorrelated *between
 consecutive calls*, not merely uniform over time - a generator whose
 successive bytes drift slowly turns those thresholds into bursts, and
 the wall guns lay down a solid line of shots instead of the odd one.
+
+## The animated scenery classes (recovered in the second pass)
+
+The class handlers the first pass skipped, all driven from the main
+loop once a frame.  The `EB n` display-list opcode files the cursor
+cell under class n *without* touching the solid map, which is how the
+runtime-only objects (22, 39, 42, 51) get their anchors; the port
+carries it as the `anim n` statement and opcode 0353.
+
+| class | handler | what it is |
+|---|---|---|
+| 2 | 0x8F5A | jet flame: two tiles below the anchor cycle through three pairs (tiles 0x15..0x1A, base 0xDAB8) in a fresh random bright ink every frame; one three-step counter is shared by every flame.  Objects 1 (platform, two jets), 2 (spaceship, two jets) and 28 (pod) |
+| 4 | 0x9118 | booth / gantry frame: the attribute of every cell rewritten from the frame counter - the teleport booths' shimmer |
+| 5 | 0x9152 / 0x9186 | land mine (object 12): armed it sits still (records {col,row,1}); when the player's feet are on its top line and his x within [-7,+2] of it, it disarms, erases, and kills through 0x9CAA - which returns while the power suit is on.  A blown mine's two cells then flicker forever through the burning pair (tiles 0x1D..0x20) |
+| 10 | 0x9C15 / 0x9C8B | the rising pump (object 22, `EB 10`): a per-pump counter rests below 0x65, then four frames up, eleven held, four down, reroll to 0x14+rand&0x3F.  Drawn from *player-bank* frame 24 (24x32); while it cycles, a 12-unit by 32-line box kills through 0x9CAA (suit walks over) |
+| 15 | 0xA7D6 | pylon arc (objects 42, 51, `EB 15`): two 16x16 frames side by side, a random frame of 28..31 and its neighbour, redrawn every frame in a random ink.  Scenery, not a hazard |
+| 16 | 0xA817 | level-gate anchor (object 42, `EB 16`, zones 24/49/74/99/124): when the player's x reaches it, the inter-level bonus screen at 0xA8DB runs (pointer minigame, extra life, suit off, refills).  NOT PORTED YET |
+| 17 | 0xAB94 / 0xABCF / 0xAC04 | the vertical laser beam (object 1's centre cell): drawn from under the platform down to the first solid cell (tile 0x25), recoloured from the frame counter every frame, kills the player whose x+12 equals its column (no suit protection), and falls after 0x19=25 laser bolts pass the cell column just left of it, which scores |
+
+Object 39 (`EB 9`, 28 placements) is the free-ball variant of the
+force field: its hook cell goes into the same class-9 list, so eight
+(here: the shared budget) energy balls drift loose between the pylons.
+
+## The swooping flyers (0xA553 spawn, 0xA360 fly, 0xA645 config)
+
+Seventy zones send flyers in.  Per-zone config at 0xA677: {zone, path
+ptr, 16x16 frame base, spawn cooldown}, self-modified into the code at
+zone load.  Six slots of ten bytes at 0xA508: {x, y, active, path ptr
+x2, path start x2, repeat, phase, ?}.
+
+Spawn (0xA553): only while the player is left of x=0x54, a free slot
+exists, and a random byte comes up >= 0xC8; x=0x78, y = player's +
+rand&0x0F (or -10 when rand >= 0xAF); then the cooldown holds the next
+one off.  Fly (0xA360): the path byte code - {dx,dy} signed pairs,
+0xC4 n = repeat the next pair n times in all, 0xC3 = back to the
+start; dies at x >= 0x80 or y >= 0xB0.  Drawn as frame base +
+(phase & 3): bases 1, 16 (the spheres), 20, 24, 37, 41.  The six paths
+at 0xA406..0xA507: a looping sine swoop, the same swoop accelerating
+away, a loop-the-loop, a straight dart, a dip-and-hold, a zigzag.
+
+A laser bolt kills one (tested from the bullet update, 0x83E3 ->
+0xA5CA), which explodes and scores; touching one is fatal (0xA5F4,
+a 4-by-8 box about its middle, via 0x9CAF - the suit does not help).
+
+## The bullet, drawn
+
+0x82FC draws a bullet as the 16-bit pattern 0x00BD shifted by
+(~E & 3)+1 double-pixels across two screen bytes and XORed on: the
+dash X.XXXX.X at two-pixel resolution.  The suit's second bullet
+leaves six pixels below the first (0x8384: `add a,6`).  The update
+0x83DD runs five times per game loop at one unit a step - that is
+both the speed (10 px/frame) and why it cannot step over a thin wall.

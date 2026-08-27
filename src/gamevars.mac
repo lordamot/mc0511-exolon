@@ -18,6 +18,8 @@ ROWPALS:	.BLKW	48.	; 24 x 2 palette words (PPU COMMAND_2)
 
 ; ---- frame / input ----------------------------------------------
 VBLF:		.BLKW	1	; vsync bits (ISR shifts in, loop consumes)
+BENCHF:		.BLKW	1	; game frames since power-up: never reset,
+				; so headless scripts can measure frame rate
 FRAMECNT:	.BLKW	1	; frames since the zone was loaded
 TICK:		.BLKW	1	; free-running tick
 KEYS:		.BLKW	1	; debounced key word for this frame
@@ -88,6 +90,82 @@ NPICKUP:	.BLKW	1	; canisters placed in this zone
 PICKS:		.BLKB	P.SIZE*NPICK
 		.EVEN
 
+; ---- display-list interpreter state (list.mac) -------------------
+LROW:		.BLKW	1	; cursor, cell units, wrapped to 8 bits
+LCOL:		.BLKW	1
+LINK:		.BLKW	1	; current ink + 1
+LBASE:		.BLKW	1	; tile bank base
+LSOLID:		.BLKW	1	; collision class written with every cell
+LHIT:		.BLKW	1
+LERASE:		.BLKW	1	; nonzero: blank the cells instead of drawing
+LSTKP:		.BLKW	1	; repeat stack pointer (bytes)
+LSTK:		.BLKW	16.	; 8 x {count, resume address}
+
+; ---- the dirty-cell bitmap (flow.mac) ----------------------------
+; One bit per cell, two words per row.  MARK_RECT sets bits, and the
+; blit pass pushes every dirty cell to the screen exactly once - a
+; screen full of overlapping sprites used to blit the same cells
+; several times over through the old rectangle list.
+DIRTY:		.BLKW	2*NROWS
+MRNEW:		.BLKW	1	; any bit newly set by the last MARK_RECT
+MRROW:		.BLKW	1
+MRML:		.BLKW	1	; the rectangle's two row masks
+MRMR:		.BLKW	1
+BLROW:		.BLKW	1	; blit pass cursors
+BLVAL:		.BLKW	1
+BLCOL:		.BLKW	1
+BLLEN:		.BLKW	1
+DRAWOFF:	.BLKW	1	; catch-up pass: update, but draw no sprites
+DRAWSKIP:	.BLKW	1	; catch-up passes taken this frame
+PAUSEREQ:	.BLKW	1	; АР2 seen during a catch-up pass
+PAUSAVE:	.BLKW	12.
+
+; ---- anim-hook cells filed by the display lists (opcode 0353) ----
+HOOKN:		.BLKW	1
+HOOKS:		.BLKB	3*NHOOK	; {class, row, col} per entry
+		.EVEN
+
+; ---- runtime scenery animations (anims.mac) ----------------------
+NFLM:		.BLKW	1	; class-2 jet flames
+FLMROW:		.BLKW	NFLAME
+FLMCOL:		.BLKW	NFLAME
+FLMPH:		.BLKW	1	; shared three-step phase
+
+NCYC:		.BLKW	1	; class-4 colour-cycled cells, as runs
+CYCROW:		.BLKB	NCYC4	; {row, first column, length} - the scan
+CYCCOL:		.BLKB	NCYC4	; visits cells left to right, so a booth
+CYCLEN:		.BLKB	NCYC4	; frame folds into a handful of runs
+CYCPH:		.BLKW	1
+
+NMIN5:		.BLKW	1	; land mines: {row, col, state} each
+MINROW:		.BLKB	NMINE5
+MINCOL:		.BLKB	NMINE5
+MINST:		.BLKB	NMINE5	; 1 armed, 0 blown
+		.EVEN
+
+NPUMPS:		.BLKW	1	; the rising pumps
+PMPCOL:		.BLKB	NPUMP
+PMPROW:		.BLKB	NPUMP	; anchor (rest) row
+PMPCUR:		.BLKB	NPUMP	; row it is drawn at now
+PMPCNT:		.BLKB	NPUMP	; the original's 0x9C70 counter
+		.EVEN
+
+BEAMON:		.BLKW	1	; the vertical laser beam (one per zone)
+BEAMROW:	.BLKW	1	; first beam cell
+BEAMCOL:	.BLKW	1
+BEAMLEN:	.BLKW	1	; cells down to the ground
+BEAMHIT:	.BLKW	1	; laser bolts taken so far
+BEAMPH:		.BLKW	1
+BEAMSAVE:	.BLKW	2*24.	; {tile, slot+class} of the covered cells
+
+FLYON:		.BLKW	1	; this zone has swooping flyers
+FLYPATH:	.BLKW	1	; their path byte code
+FLYFRB:		.BLKW	1	; 16x16 frame base
+FLYCDV:		.BLKW	1	; frames between spawns
+FLYCD:		.BLKW	1	; cooldown now
+FLYS:		.BLKB	F.SIZE*NFLY
+		.EVEN
+
 ; ---- scratch ----------------------------------------------------
 ENTW:		.BLKW	1	; entity box for ENT_HITPLAYER, x units
 ENTH:		.BLKW	1	; and pixels
@@ -106,5 +184,78 @@ SPRSRC:		.BLKW	1
 SPRDST:		.BLKW	1
 TMPA:		.BLKW	1
 TMPB:		.BLKW	1
+
+; ---- scratch words moved out of the code modules (all of them
+; written before they are read) ----------------------------------
+BOLTX:		.BLKW	1
+BOLTY:		.BLKW	1
+BOLTS:		.BLKW	1
+GRSTEPS:		.BLKW	1
+GRIDX:		.BLKW	1
+GRDY:		.BLKW	1
+BALLDY:		.BLKW	1
+BALLX:		.BLKW	1
+BALLY:		.BLKW	1
+BALLN:		.BLKW	1
+BALLQ:		.BLKW	1
+ECUR:		.BLKW	1
+EMITI:		.BLKW	1
+MINEFR:		.BLKW	1
+BVSN:		.BLKW	1
+BVSOBJ:		.BLKW	1
+BVSW:		.BLKW	1
+BVSH:		.BLKW	1
+BVSMW:		.BLKW	1
+BVSMH:		.BLKW	1
+OCROW:		.BLKW	1
+OCCOL:		.BLKW	1
+OCW:		.BLKW	1
+OCH:		.BLKW	1
+GBOBJ:		.BLKW	1
+GBN:		.BLKW	1
+GBROW:		.BLKW	1
+GBCOL:		.BLKW	1
+GRROW:		.BLKW	1
+GRCOL:		.BLKW	1
+GRSPAN:		.BLKW	1
+GRACC:		.BLKW	1
+GRDELTA:		.BLKW	1
+BOLTN:		.BLKW	1
+FLMI:		.BLKW	1
+CYCI:		.BLKW	1
+MINI:		.BLKW	1
+PMPI:		.BLKW	1
+FLYI:		.BLKW	1
+ARCF:		.BLKW	1
+ARCX:		.BLKW	1
+ARCY:		.BLKW	1
+MENUC:		.BLKW	1
+RNDTMP:		.BLKW	1
+GAMEOVER:		.BLKW	1
+ROWTMP:		.BLKW	1
+CRW:		.BLKW	1
+CRW0:		.BLKW	1
+CRH:		.BLKW	1
+CRC:		.BLKW	1
+CRC0:		.BLKW	1
+CRB:		.BLKW	1
+CRB0:		.BLKW	1
+HN_VAL:		.BLKW	1
+HN_COL:		.BLKW	1
+HN_INK:		.BLKW	1
+HN_CNT:		.BLKW	1
+PCROW:		.BLKW	1
+PCCOL:		.BLKW	1
+PCACC:		.BLKW	1
+PSTEP:		.BLKW	1
+PTRI:		.BLKW	1
+PTCI:		.BLKW	1
+PKROW:		.BLKW	1
+PKCOL:		.BLKW	1
+PL_FROM:		.BLKW	1
+GUNT:		.BLKW	1
+GUNROW:		.BLKW	1
+GUNCOL:		.BLKW	1
+ECUR_OBJ:		.BLKW	1
 
 		. = 0		; back to the boot sector origin

@@ -25,7 +25,6 @@ ENEMY_UPD:	TST	NLIVE
 ; one object: R5 = record (kept in ECUR_OBJ as well - drawing a frame
 ; of the recoil goes through the cell and blit helpers, which keep no
 ; registers at all)
-ECUR_OBJ:	.WORD	0
 ENEMY_ONE:	MOV	R5,ECUR_OBJ
 		MOVB	O.OBJ(R5),R0
 		BIC	#177400,R0
@@ -129,11 +128,6 @@ EO_GUNANIM:	DEC	R0
 		CALL	MARK_RECT
 		RETURN
 
-GUNT:		.WORD	0
-GUNROW:		.WORD	0
-GUNCOL:		.WORD	0
-
-; Put tile R4 into cell (R0, R1), leaving its ink and its collision
 ; class alone: the emplacement's colour and its solid cells must not
 ; change while it recoils.
 CELL_TILE:	CMP	R0,#NROWS

@@ -1,9 +1,8 @@
 ; ------------------------------------------------------------------
 ; Startup: install the vsync ISR, load the PPU program, then loop
-; between the title screen and a game.
+; between the title screen and a game.  Follows straight on from the
+; boot sector's jump at 1000 - nothing pads the gap.
 ; ------------------------------------------------------------------
-		.BLKB	2000-.
-
 MAIN_START:	MOV	#STACK_TOP,SP
 		MOV	#INTERR_MAIN,@#100
 		MOV	#TRAP_RTI,@#4	; stray traps: ignore
@@ -18,6 +17,9 @@ MAIN_START:	MOV	#STACK_TOP,SP
 		MOV	#1,RNDSEED
 		CLR	CHEAT
 		CLR	ROCKACT
+		CLR	LERASE		; list state is uninitialised RAM
+		CLR	BENCHF
+		CALL	MARKS_CLEAR
 		CALL	REV_INIT	; byte -> reversed bits, for facing left
 		CALL	PP_MAIN_LOAD	; PPU: line table, colours, sound
 

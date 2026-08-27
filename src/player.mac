@@ -268,12 +268,6 @@ PL_CEIL:	MOV	PY,R0
 9$:		MOV	#1,R0		; the top of the screen holds
 		RETURN
 
-PCROW:		.WORD	0
-PCCOL:		.WORD	0
-PCACC:		.WORD	0
-PSTEP:		.WORD	0
-
-; ------------------------------------------------------------------
 ; Collision class of cell (R0 = row, R1 = col) -> R0.  Off-map cells
 ; read as empty, so the sky and the sides never block.
 MAP_CLASS:	CMP	R0,#NROWS
@@ -347,12 +341,6 @@ PL_TRIGGERS:	MOV	PY,R0
 		BNE	1$
 		RETURN
 
-PTRI:		.WORD	0
-PTCI:		.WORD	0
-PKROW:		.WORD	0
-PKCOL:		.WORD	0
-
-; act on class R0 at cell (R4, R5)
 PL_TRIGGER1:	CMP	R0,#CL_AMMO	; ammunition canister
 		BNE	10$
 		MOV	#99.,AMMO
@@ -363,12 +351,12 @@ PL_TRIGGER1:	CMP	R0,#CL_AMMO	; ammunition canister
 		BR	PL_TAKE
 30$:		CMP	R0,#CL_MINE	; a mine goes off on contact
 		BEQ	40$
-		CMP	R0,#5		; animated solids that kill (0x9186)
-		BEQ	40$
 		RETURN			; CL_FIELD is harmless in itself - the
 					; original leaves 0 in the map for it
 					; and lets the balls it emits do the
-					; killing (see BALL_EMIT)
+					; killing (see BALL_EMIT); the land
+					; mines (class 5) go off underfoot,
+					; through MINES_UPD in anims.mac
 40$:		JMP	PLAYER_KILL
 
 ; Take the canister that owns cell (R4, R5).  The original erases the
@@ -529,7 +517,6 @@ PL_WARP:	MOV	R0,-(SP)
 		MOV	#SFX_PICK,SND_REQ
 		RETURN
 
-PL_FROM:	.WORD	0	; the pad PL_SPECIAL found him on
 
 ; Start the spark shower over teleport pad R0 (0x9ED9): the emitter sits
 ; one cell row below the pad, which is where the pad's own graphic is.
@@ -566,7 +553,16 @@ PL_ZONEEDGE:	CMP	PX,#124.
 9$:		RETURN
 
 ; ------------------------------------------------------------------
-PLAYER_KILL:	TST	PDEAD
+; The land mines and the rising pumps kill through the original's
+; 0x9CAA, which simply returns while the power suit is on - the suit
+; walks over both unharmed and is not even used up.
+PLAYER_KILLNS:	TST	PSUIT
+		BEQ	PLAYER_KILL
+		RETURN
+
+PLAYER_KILL:	CMP	CHEAT,#2	; 2 = invulnerable, for the headless
+		BEQ	9$		; tests (never offered by the menu)
+		TST	PDEAD
 		BNE	9$
 		TST	PSUIT		; the power suit takes one hit
 		BEQ	1$

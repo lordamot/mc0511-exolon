@@ -155,6 +155,20 @@ player, `make shot` / `make demo` drive the headless emulator, and
 11. the double gun's two streams as separate targets, the power suit's
     twin guns, harmless explosions, and a generator worth the name
     [DONE]
+12. the animation and enemy pass (see re-notes.md "second pass"): jet
+    flames under the platforms, ships and pods; the booths' colour
+    cycle; the land mines; the rising pumps; the vertical laser beam;
+    the pylon arcs; object 39's free energy balls; the swooping flyers
+    of seventy zones with the original's six paths and frame sets; the
+    bolt as the original's 0xBD dash from two barrels six pixels
+    apart; menu option 3 (start from a chosen zone); and the
+    performance pass - the dirty-cell bitmap, frame-skip catch-up,
+    and a kilobyte and a half of buffers moved out of the image [DONE]
+
+Not yet ported: class 16, the level gate - the inter-level bonus
+screen at 0xA8DB with its pointer minigame (objects 42's anchors in
+zones 24, 49, 74, 99 and 124 do nothing; the zones still chain by
+walking off the right edge).
 
 ## Notes from the implementation
 
@@ -213,6 +227,22 @@ player, `make shot` / `make demo` drive the headless emulator, and
   overlap into one blob, `BALLS` is six, shared between the emitters of
   the handful of zones that have two.
 
+
+- **The frame budget, and what happens beyond it.**  A busy zone
+  (six energy balls, a flyer swarm, the pumps) costs more than a 20 ms
+  frame.  Two answers ship together.  The dirty-cell bitmap: MARK_RECT
+  sets bits (one per cell, two words a row) instead of appending to a
+  rectangle list, and the blit pass pushes every dirty cell to the
+  screen exactly once - overlapping sprites used to blit the same
+  cells several times.  And frame-skip: when the vsync backlog shows
+  the last frame overran, up to two update passes run with the sprite
+  plotters gated off (`DRAWOFF`), then the third draws and blits - the
+  game logic holds 50 Hz and the screen drops to half or a third rate
+  instead of the whole game slowing down.  АР2 and СТОП edges seen by
+  a catch-up pass's input read are latched (`PAUSEREQ`) and acted on
+  once the frame is drawn.  `BENCHF` counts update passes and never
+  resets; the headless emulator's `runrel` command runs until it has
+  advanced N, which is what the gameplay tests count in.
 
 - **Where the RAM ends.**  The UKNC CPU only has RAM below 0160000;
   0160000..0177777 is the I/O page in user mode.  Everything - program,
