@@ -5,7 +5,7 @@
 ; before the code (every label is then known everywhere) and returns
 ; the location counter to 0 for boot.mac at the end.
 ; ------------------------------------------------------------------
-		. = 153000
+		. = 145000
 
 ; PPU mailbox (written by the PPU program through @#177010/177014).
 ; CPU_VSYNC must directly follow KEYS_DATA - the PPU timer writes them
@@ -14,6 +14,7 @@ KEYS_DATA:	.BLKW	1	; key state word from the PPU
 CPU_VSYNC:	.BLKW	1	; nonzero once per 50 Hz tick
 SND_REQ:	.BLKW	1	; sound request (SFX_* in defs.mac)
 SND_MODE:	.BLKW	1	; nonzero = play the title tune
+SND_DEV:	.BLKW	1	; sound device: 0 = beeper, 1 = AY module
 ROWPALS:	.BLKW	48.	; 24 x 2 palette words (PPU COMMAND_2)
 
 ; ---- frame / input ----------------------------------------------
@@ -67,6 +68,12 @@ LIVES:		.BLKW	1
 SCORE:		.BLKB	6	; six ASCII digits
 		.EVEN
 HUDDIRTY:	.BLKW	1
+
+; ---- the two tables REV_INIT builds at startup -------------------
+REVTAB:		.BLKB	400	; byte -> its bits reversed: mirrors the
+				; player when he faces left
+DUPTAB:		.BLKW	400	; byte -> the same byte in both halves of
+				; a word, one pixel row of a 2-plane sprite
 
 ; ---- entity + object lists --------------------------------------
 ENTS:		.BLKB	E.SIZE*NENT
@@ -184,8 +191,6 @@ FLYS:		.BLKB	F.SIZE*NFLY
 ; ---- scratch ----------------------------------------------------
 ENTW:		.BLKW	1	; entity box for ENT_HITPLAYER, x units
 ENTH:		.BLKW	1	; and pixels
-				; (REVTAB and DUPTAB overlay the dead
-				; CPU-side PPU block - see ppu_end.mac)
 SPRSHIFT:	.BLKW	1
 SPRMIR:		.BLKW	1	; nonzero = draw the frame mirrored
 SPRH:		.BLKW	1	; lines of a 16x16 frame to draw (0 = all)

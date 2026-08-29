@@ -438,12 +438,12 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		MOV	#2,R2
 		MOV	#S_AUTHOR,R3
 		CALL	PRINT_STR
-		MOV	#8.,R0
+		MOV	#7,R0
 		MOV	#11.,R1
 		MOV	#1,R2
 		MOV	#S_PORT,R3
 		CALL	PRINT_STR
-		MOV	#10.,R0
+		MOV	#9.,R0
 		MOV	#6,R1
 		MOV	#3,R2
 		MOV	#S_START,R3
@@ -466,6 +466,12 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		MOV	#S_PALOPT,R3
 		CALL	PRINT_STR
 		CALL	MENU_PAL
+		MOV	#SN_ROW,R0	; option 5: the beeper, or the AY
+		MOV	#6,R1		; sound module if the machine has one
+		MOV	#3,R2
+		MOV	#S_SNDOPT,R3
+		CALL	PRINT_STR
+		CALL	MENU_SND
 		MOV	#14.,R0
 		MOV	#10.,R1
 		MOV	#2,R2
@@ -512,11 +518,17 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 63$:		CALL	MENU_ZSHOW
 7$:		MOV	#K_4,R0		; '4' swaps the palette's colour order,
 		CALL	KEY_EDGE	; live - the screen recolours as you watch
-		BEQ	8$
+		BEQ	70$
 		MOV	#1,R0
 		XOR	R0,PALORD
 		CALL	PAL_SETORD
 		CALL	MENU_PSHOW
+70$:		MOV	#K_5,R0		; '5' swaps the beeper for the AY
+		CALL	KEY_EDGE	; module - the tune changes over as
+		BEQ	8$		; you listen
+		MOV	#1,R0
+		XOR	R0,SND_DEV
+		CALL	MENU_SSHOW
 8$:		MOV	#K_1,R0		; '1' starts, as the menu says
 		CALL	KEY_EDGE
 		BEQ	2$
@@ -528,12 +540,14 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 ; Written into the cell buffer only - MENU expands and blits the whole
 ; screen after the first call, and MENU_SHOWCH / MENU_ZSHOW do the few
 ; changed cells after a toggle.
-CH_ROW	= 11.
+CH_ROW	= 10.
 CH_COL	= 23.
-ZS_ROW	= 12.
+ZS_ROW	= 11.
 ZS_COL	= 24.
-PS_ROW	= 13.
+PS_ROW	= 12.
 PS_COL	= 23.
+SN_ROW	= 13.
+SN_COL	= 23.
 
 ZSELON:		.WORD	0	; option 3 armed
 ZSEL:		.WORD	0	; the zone a game will then start in
@@ -631,6 +645,41 @@ MENU_PSHOW:	CALL	MENU_PAL
 		MOV	#PS_ROW,R0
 		MOV	#PS_COL,R1
 		MOV	#3,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
+		RETURN
+
+; ------------------------------------------------------------------
+; Option 5's state cells: BEEPER or AY, so the shorter one has to be
+; written over a blanked six cells.
+MENU_SND:	MOV	#SN_COL,MENUC
+1$:		MOV	#SN_ROW,R0
+		MOV	MENUC,R1
+		CLR	R2
+		CLR	R4
+		CALL	CELL_SET
+		INC	MENUC
+		CMP	MENUC,#SN_COL+6
+		BLO	1$
+		MOV	#S_BEEPER,R3
+		TST	SND_DEV
+		BEQ	2$
+		MOV	#S_AY,R3
+2$:		MOV	#SN_ROW,R0
+		MOV	#SN_COL,R1
+		MOV	#2,R2
+		CALL	PRINT_STR
+		RETURN
+
+MENU_SSHOW:	CALL	MENU_SND
+		MOV	#SN_ROW,R0
+		MOV	#SN_COL,R1
+		MOV	#6,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#SN_ROW,R0
+		MOV	#SN_COL,R1
+		MOV	#6,R2
 		MOV	#1,R3
 		CALL	BLIT_RECT
 		RETURN

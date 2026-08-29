@@ -10,9 +10,14 @@ of its idle loop and flips the speaker on the carry, so the tone is
 inc/65536 of the loop rate.  The AY tone the original played is
 1773400 / (16 * period) Hz, so the increment is simply MU_K / period.
 
+The AY sound module needs none of that arithmetic - it is fed the
+original's periods as they stand - so the same pitch index also
+addresses AY_PERIODS.
+
 Emits:
 
     MU_PERIODS   word per distinct pitch (phase increment, 0 = rest)
+    AY_PERIODS   word per distinct pitch (the AY period itself)
     MU_CH0/1/2   {pitch index, frames} byte pairs, 0377 ends the voice
 """
 
@@ -64,6 +69,9 @@ def main(argv=None):
         inc = max(1, min(0o77777, MU_K // p))
         lines.append(f"\t\t.WORD\t{inc:o}\t; AY period {p} = "
                      f"{110837.5 / p:.0f} Hz")
+    lines += ["AY_PERIODS:", "\t\t.WORD\t0"]
+    for p in pitches:
+        lines.append(f"\t\t.WORD\t{p:o}\t; {110837.5 / p:.0f} Hz")
     total = 0
     for c in range(3):
         ev = chans[c] if c < len(chans) else []

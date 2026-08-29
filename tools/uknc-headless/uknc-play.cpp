@@ -238,6 +238,10 @@ int main(int argc, char *argv[])
     CProcessor::Init();
     g_pBoard = new CMotherboard();
     g_pBoard->LoadROM(rom);
+    // the AY sound module the game's menu option 5 can pick: the core
+    // leaves it off, and its three chips answer on the PPU bus at
+    // 0177360/2/4
+    g_pBoard->SetSoundAY(true);
     g_pBoard->Reset();
     if (diskPath && !g_pBoard->AttachFloppyImage(0, diskPath))
     {

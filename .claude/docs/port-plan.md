@@ -11,15 +11,21 @@ and every resource generated from editable text files.
 | Range | What |
 |---|---|
 | 0..777 | boot sector (src/boot.mac) |
-| 1000..114777 | program + data (code, tiles, lists, zones, sprites) |
-| 115000..144777 | back buffer: 192 lines x 32 cell words (planes 1+2) |
-| 145000..152777 | cell buffer: 24 x 32 x {tile word, slot byte, class byte} |
-| 153000..156030 | game variables, entity and object lists |
+| 1000..106xxx | program + data (code, tiles, lists, zones, sprites, strings) |
+| 106xxx..116xxx | the PPU block: dead CPU RAM once it is loaded |
+| 107000..136777 | back buffer: 192 lines x 32 cell words (planes 1+2) |
+| 137000..144777 | cell buffer: 24 x 32 x {tile word, slot byte, class byte} |
+| 145000..151546 | game variables, REVTAB / DUPTAB, entity and object lists |
 | 160000 | stack top (RAM ends at 157777; the first push lands at 157776) |
 
-The CPU-side copy of the PPU block (PP_START..PP_END) is dead once
-PP_MAIN_LOAD has pushed it into PPU RAM; the runtime-built REVTAB and
-DUPTAB tables overlay it (src/ppu_end.mac).
+The CPU-side copy of the PPU block (PP_START..PP_END, four kilobytes of
+it) is dead once PP_MAIN_LOAD has pushed it into PPU RAM, so
+src/exolon.list puts that block last, after every live byte, and the
+back buffer starts where the live program ends and overlays it - which
+is where the second sound engine found its room.  PROG_SIZE covers the
+whole image (the loader reads it all in); BUF is the hand-set start of
+the live program's dead tail, and tools/build_exolon.py fails the build
+if the live program ever grows past it.
 
 Planes are 64 KB each; the CPU address space *is* planes 1 and 2
 interleaved (CPU byte 2N = plane1[N], 2N+1 = plane2[N]).  The visible
@@ -58,20 +64,32 @@ would need.
 
 CPU: the game engine.  PPU (`src/ppu.mac`, loaded over channel K2 at
 startup like brucelee): video line table + palettes, keyboard -> key
-word in CPU RAM, the vsync flag, and the **beeper sound engine** in
-its idle loop (speaker = bit 7 of PPU port 177716).  The CPU asks for
-sounds through the `SND_REQ` / `SND_MODE` mailbox words.
+word in CPU RAM, the vsync flag, and the **sound engine** in its idle
+loop.  The CPU asks for sounds through the `SND_REQ` / `SND_MODE`
+mailbox words and picks the device with `SND_DEV`: 0 is the beeper
+(speaker = bit 7 of PPU port 177716), 1 the AY sound module (three
+AY-3-8910 on the PPU bus at 0177360/2/4 - word write = register
+number, byte write = value; the game uses the first).  The beeper
+engine is a timing loop and holds the PPU for as long as a sound
+lasts; the AY engine runs a pass per 50 Hz tick and never blocks.
+Menu option 5 switches between them live.
 
 Music: Exolon's 48K release has beeper effects only, but the tape also
 carries the 128K AY tune (three streams, see re-notes.md).
 `tools/music_extract.py` decodes it and `tools/music_gen.py` renders it
 for a three-voice beeper player on the PPU: each voice is a 16-bit
 phase accumulator whose carry flips the speaker, so three square waves
-are XORed onto one bit.
+are XORed onto one bit.  The same generator also emits `AY_PERIODS`,
+the original's periods unchanged, which the AY player writes to the
+chip a voice to a channel.  (UKNCBTL clocks its AY at about 1.41 MHz
+rather than a real module's 1.77, so the tune sounds a major third
+flat in the emulator - the periods are right, the emulator is not.)
 
-Keyboard (PPU): arrows = left/right/jump/duck, ФИКС or space = fire,
+Keyboard (PPU): arrows = left/right/jump/duck, space = fire, ФИКС or
 numpad ВВОД = grenade, ENTER = menu select, АП2 = pause, СТОП = quit,
-'1'..'4' = the title screen's options.
+'1'..'5' = the title screen's options.  The key word has one bit per
+key and only sixteen of them: '5' took bit 8 off the player-2 up arrow
+this game has not got, the way '4' took bit 9 off the player-2 right.
 
 ## The game engine
 
@@ -151,7 +169,8 @@ player, `make shot` / `make demo` drive the headless emulator, and
 4. bolts, grenades, ammo, pickups [DONE]
 5. enemies and hazards, death, lives, the power suit [DONE]
 6. HUD, zone flow, all 125 zones [DONE]
-7. beeper music + SFX in the PPU [DONE]
+7. beeper music + SFX in the PPU, and the same on an AY sound module
+   with the title screen picking the device [DONE]
 8. title screen with the original logo, pause, docs, verify [DONE]
 9. the animation and behaviour passes: facing, the grenade's arc and
    smoke, the emplacement recoil, the teleport shower, force-field

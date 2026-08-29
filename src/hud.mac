@@ -93,8 +93,8 @@ HUD_VALUES:	MOV	AMMO,R4		; ammo, two digits
 		MOV	#2,R2
 		MOV	#2,R5
 		CALL	HUD_NUM
-		MOV	#HUD_VAL,R0	; score, six digits
-		MOV	#HC_PTS+1,R1
+		MOV	#HUD_VAL,R0	; score, six digits, squared up
+		MOV	#HC_PTS,R1	; under the label
 		MOV	#1,R2
 		MOV	#SCORE,R3
 		MOV	#6,R5

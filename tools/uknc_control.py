@@ -22,8 +22,8 @@ command set).  `keys` lists the key names.
 
 Key names (or a raw octal UKNC scancode):
     UP DOWN LEFT RIGHT ENTER FIRE1 FIRE2 AP2 STOP SPACE 0..9
-FIRE1 is ФИКС (player 1 open), FIRE2 is numpad ВВОД (player 2 open),
-AP2/STOP open the in-game menu.
+FIRE1 is ФИКС and FIRE2 numpad ВВОД - the game throws a grenade with
+either and fires with SPACE; AP2/STOP open the in-game menu.
 """
 
 import argparse

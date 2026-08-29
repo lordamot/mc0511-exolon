@@ -39,9 +39,11 @@ Exit status is nonzero if anything fails.
 """
 
 import argparse
+import array
 import subprocess
 import sys
 import tempfile
+import wave
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -56,7 +58,7 @@ import exolon_re as E
 import rt11_home as HOME
 
 ROOT = Path(__file__).resolve().parent.parent
-PROG_SIZE = 0o115000
+PROG_SIZE = 0o117000
 
 fails = []
 
@@ -133,7 +135,7 @@ screenshot {out_png.with_suffix('.title.bmp')}
 press {K_ONE:o} 3
 run 120
 screenshot {out_png}
-dumpcpu 0145000 3072 {out_png.with_suffix('.cells.bin')}
+dumpcpu 0{CELLS:o} 3072 {out_png.with_suffix('.cells.bin')}
 quit
 """
     with tempfile.NamedTemporaryFile("w", suffix=".script",
@@ -181,14 +183,18 @@ NENT = 48
 EK_ROCK_FRAME = 36        # the hunting rocket's 16x16 frame
 C_SIZE, C_ROW = 4, 128
 GUN_TILE = 191
-BUF = 0o115000
-CELLS = 0o145000
+BUF = 0o107000
+CELLS = 0o137000
 
 # The firmware boot menu wants "1" then ENTER; the game's own title
 # screen is started with "1" as well (K_ONE); "2" toggles infinite
-# lives and "4" the palette's colour order.
-K_RIGHT, K_DOWN, K_UP, K_FIRE, K_GREN = 133, 134, 154, 107, 166
-K_ONE, K_TWO, K_FOUR, K_PAUSE = 0o30, 0o31, 0o13, 0o6
+# lives, "4" the palette's colour order and "5" the sound device.
+# Fire is the space bar and the grenade ФИКС (0107 - the numpad ВВОД
+# at 0166 throws one too).
+K_RIGHT, K_DOWN, K_UP, K_FIRE, K_GREN = 133, 134, 154, 113, 107
+K_ONE, K_TWO, K_FOUR, K_FIVE, K_PAUSE = 0o30, 0o31, 0o13, 0o34, 0o6
+# (K_RIGHT..K_GREN are written as the emulator's octal digits and go
+# into a script as they are; K_ONE.. are ints and take :o)
 
 BOOT = f"""run 900
 press 030
@@ -386,7 +392,7 @@ def gameplay(tmpdir):
     # the dive brings it down onto the emplacement, and from too far
     # back it is in the ground before it gets there.
     objs2 = td / "objs2.bin"
-    gcell = 0o145000 + 18 * C_ROW + 20 * C_SIZE + 2
+    gcell = CELLS + 18 * C_ROW + 20 * C_SIZE + 2
     gv = emu(alive(GROUND) + f"{poke16(A_PX, 72)}run 4\n"
              f"press {K_GREN} 4\nrun 60\n"
              f"dumpcpu {A_OBJLIST:o} 32 {objs2}\n"
@@ -550,7 +556,7 @@ def gameplay_new(td, v):
     cells = [td / f"c{i}.bin" for i in range(4)]
     body = (alive(GROUND)
             + f"run 20\npokecpu {A_OBJLIST + O_SIZE + O_T:o} 11\n")
-    body += "".join(f"run 1\ndumpcpu 0145000 3072 {f}\n" for f in cells)
+    body += "".join(f"run 1\ndumpcpu 0{CELLS:o} 3072 {f}\n" for f in cells)
     emu(body, td)
 
     def tile(blob, r, c):
@@ -881,10 +887,12 @@ def firepower(tmpdir, v):
 
 def menu(tmpdir):
     """The title screen: "1" starts, "2" turns infinite lives on and it
-    holds through a death, "4" swaps the palette's colour order."""
+    holds through a death, "4" swaps the palette's colour order and "5"
+    the sound device."""
     td = Path(tmpdir)
     A_LIVES, A_CHEAT, A_ZONE = sym("LIVES"), sym("CHEAT"), sym("ZONE")
     A_PDEAD, A_PALORD, A_ROWPALS = sym("PDEAD"), sym("PALORD"), sym("ROWPALS")
+    A_SNDDEV = sym("SND_DEV")
     title = ("run 900\npress 030\nrun 30\npress 153\nrun 500\n")
 
     # "1" alone gets into a game
@@ -932,6 +940,28 @@ def menu(tmpdir):
     check("and the game keeps the order the menu chose",
           po[3] == 1 and po[4] >> 8 == 0o15,
           f"order {po[3]}, cyan {po[4] >> 8:o}")
+
+    # "5" hands the sound over to the AY module, and the choice holds
+    # into the game.  The beeper is one bit, so its audio is two levels
+    # and nothing else; the chip's is not, which is how we know the
+    # tune really is coming out of it.
+    wav = td / "ay.wav"
+    sd = emu_raw(title + f"peekcpu {A_SNDDEV:o}\n"
+                 f"press {K_FIVE:o}\nrun 20\npeekcpu {A_SNDDEV:o}\n"
+                 f"wavstart\nrun 100\nwavstop {wav}\n"
+                 f"press {K_ONE:o}\nrun 80\npeekcpu {A_SNDDEV:o}\n", td)
+    check("5 hands the sound to the AY module",
+          sd[0] == 0 and sd[1] == 1, f"device {sd[0]} -> {sd[1]}")
+    check("and the game keeps the device the menu chose", sd[2] == 1,
+          f"device {sd[2]}")
+    levels = 0
+    if wav.exists():
+        with wave.open(str(wav)) as w:
+            pcm = array.array("h")
+            pcm.frombytes(w.readframes(w.getnframes()))
+        levels = len(set(pcm))
+    check("and the tune comes out of the chip, not the beeper",
+          levels > 2, f"{levels} distinct audio level(s)")
 
 
 K_3 = 0o32

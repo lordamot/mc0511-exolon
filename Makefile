@@ -11,8 +11,8 @@ build:
 	python3 tools/build_exolon.py $(GAME_DSK)
 
 # build, then open a playable emulator window (SDL2, UKNCBTL core).
-# It boots the firmware loader by itself; arrows move and jump,
-# ФИКС/space fires, numpad ВВОД throws a grenade, ENTER starts.
+# It boots the firmware loader by itself; arrows move and jump, space
+# fires, ФИКС (or numpad ВВОД) throws a grenade, ENTER starts.
 run: build
 	bin/ukncbtl/uknc-play --rom bin/ukncbtl/uknc_rom.bin --disk $(GAME_DSK)
 

@@ -3,8 +3,10 @@
 ; assembles them with bin/macro11.  boot.mac must stay first (it pads
 ; itself to 1000, where main.mac's MAIN_START region begins); nothing
 ; may sit between ppu.mac's PP_START and ppu_end.mac's PP_END (that
-; block, music data included, is copied into PPU RAM); gamevars.mac
-; and tail.mac close the layout.
+; block, music data included, is copied into PPU RAM).  That block
+; comes last, after every live byte: it is dead CPU RAM once the load
+; is done, and the back buffer overlays it (see src/defs.mac).
+; gamevars.mac and tail.mac close the layout.
 src/defs.mac
 src/gamevars.mac
 src/boot.mac
@@ -21,12 +23,12 @@ src/hud.mac
 src/input.mac
 src/gfx.mac
 src/ppucomm.mac
-src/ppu.mac
-build/data_music.mac
-src/ppu_end.mac
 build/data_tiles.mac
 build/data_lists.mac
 build/data_zones.mac
 build/data_sprites.mac
 build/strings.mac
+src/ppu.mac
+build/data_music.mac
+src/ppu_end.mac
 src/tail.mac

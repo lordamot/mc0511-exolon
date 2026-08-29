@@ -9,13 +9,14 @@ K_RIGHT	= 2
 K_DOWN	= 4		; arrow down  - crouch
 K_LEFT	= 10
 K_ENTER	= 20		; menu select
-K_FIRE	= 40		; ФИКС or space
+K_FIRE	= 40		; space
 K_1	= 100		; '1' - menu: start a game
 K_PAUSE	= 200		; АП2
 K_2	= 10000		; '2' - menu: infinite lives on / off
 K_3	= 40000		; '3' - menu: pick the starting zone
 K_4	= 1000		; '4' - menu: the palette's colour order
-K_GREN	= 20000		; numpad ВВОД - grenade
+K_5	= 400		; '5' - menu: the sound device
+K_GREN	= 20000		; ФИКС or numpad ВВОД - grenade
 K_STOP	= 100000
 
 INPUT_READ:	MOV	KEYS,KEYPREV

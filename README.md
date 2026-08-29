@@ -8,7 +8,8 @@ re-implemented in MACRO-11 for the UKNC's twin PDP-11 processors: all
 them, Vitorc with the original jump arc and walk cycle, his laser and
 grenades, the gun emplacements and their recoil, the force fields'
 energy balls, the mines' homing missiles, the canisters and the power
-suit, plus three-voice beeper music and sound effects.
+suit, plus three-voice music and sound effects on the beeper or on an AY
+sound module, whichever the title screen is set to.
 
 Everything builds from editable text sources into a bootable `.dsk`
 image with modern PC-based tools - no vintage software needed.
@@ -43,6 +44,7 @@ numbered options and one more:
 | 2 | infinite lives on / off |
 | 3 | start from a chosen zone - pick it with ↑ / ↓ while the option is on |
 | 4 | the palette's colour order - RGB or GRB |
+| 5 | the sound device - the beeper, or an AY sound module |
 
 and in play:
 
@@ -51,8 +53,8 @@ and in play:
 | ← → | walk - Vitorc turns to face the way he is going |
 | ↑ | jump; in a teleport booth or a suit booth, use it |
 | ↓ | crouch - a gun emplacement's shot passes over you |
-| ФИКС (LCtrl) or space | fire - one bolt, or two in the power suit |
-| numpad ВВОД (RCtrl) | throw a grenade |
+| space | fire - one bolt, or two in the power suit |
+| ФИКС (LCtrl), or numpad ВВОД (RCtrl) | throw a grenade |
 | АП2 | pause |
 | СТОП | leave the game |
 
@@ -219,6 +221,25 @@ carry: three square waves XORed onto one output, with the pitch exact
 to a fraction of a hertz.  The tune is Exolon's own - the 128K release
 carried an AY score that the 48K one never played, and
 `tools/music_extract.py` decodes its three streams out of the tape.
+
+A machine with an **AY sound module** plays the same tune on the chip
+it was written for, and the title screen's fifth option switches over
+live - press '5' and the music changes device mid-bar.  The module's
+three AY-3-8910 sit on the PPU bus at 0177360, 0177362 and 0177364 (a
+word write latches a register number, a byte write fills it in); the
+game uses the first, one voice to a channel, and feeds it the
+original's own periods unchanged.  The effects then play on channel C,
+as a tone that slides or as noise that fades, one tick of the 50 Hz
+clock at a time - so unlike the beeper's timing loops, which hold the
+PPU for as long as the sound lasts, an AY effect costs the game
+nothing while it sounds.
+
+One caveat for listening in an emulator: UKNCBTL clocks its AY off the
+22 kHz mixing rate, which works out at about 1.41 MHz rather than the
+1.77 MHz a real module runs at, so the tune comes out roughly a major
+third flat there.  The periods the port writes are the original's, and
+are what a real module wants - do not "fix" them against the
+emulator.
 
 ## Project layout
 

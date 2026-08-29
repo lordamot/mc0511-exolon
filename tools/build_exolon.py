@@ -9,13 +9,16 @@ with tools/obj2bin.py, and lay out the raw disk (program at LBA 0).
 Usage: build_exolon.py [OUT.dsk] [--force]
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
-PROG_SIZE = 0o115000        # must match PROG_SIZE in src/defs.mac
+PROG_SIZE = 0o117000        # must match PROG_SIZE in src/defs.mac
+BUF = 0o107000              # and BUF: the back buffer overlays the PPU
+                            # block, so the live program must end below it
 DISK_SIZE = 819200
 SECTOR = 512
 VOLUME = "EXOLON"           # the disk's name, in the RT-11 home block
@@ -66,6 +69,16 @@ def main():
             "build/exolon.mac")
     if "***ERROR" in r.stdout or "***ERROR" in r.stderr:
         sys.exit("error: assembler reported errors (see build/exolon.lst)")
+
+    # The PPU block is the image's tail and the back buffer overlays it;
+    # everything the game still needs after the load has to end below BUF.
+    m = re.search(r"^\s*\d+\s+([0-7]+)\s.*\bPP_START:", 
+                  (BUILD / "exolon.lst").read_text(), re.M)
+    if not m:
+        sys.exit("error: cannot find PP_START in build/exolon.lst")
+    if int(m.group(1), 8) > BUF:
+        sys.exit(f"error: the live program ends at 0{m.group(1)}, past the "
+                 f"back buffer at 0{BUF:o}")
     run(py, "tools/obj2bin.py", "build/exolon.obj", "build/exolon.raw",
         "--size", str(PROG_SIZE))
 

@@ -11,6 +11,7 @@ MAIN_START:	MOV	#STACK_TOP,SP
 		CLR	CPU_VSYNC
 		CLR	SND_REQ
 		CLR	SND_MODE
+		CLR	SND_DEV		; the beeper until the menu says otherwise
 		CLR	VBLF
 		CLR	KEYS
 		CLR	KEYPREV
