@@ -16,6 +16,7 @@ MAIN_START:	MOV	#STACK_TOP,SP
 		CLR	KEYPREV
 		MOV	#1,RNDSEED
 		CLR	CHEAT
+		CLR	PALORD		; the palette order PALNIB starts on
 		CLR	ROCKACT
 		CLR	LERASE		; list state is uninitialised RAM
 		CLR	BENCHF

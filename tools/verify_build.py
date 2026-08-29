@@ -26,7 +26,8 @@ Seven groups of checks:
 7. features - the animation and enemy pass: jet flames, the booths'
    colour cycle, the land mines, the rising pumps, the vertical laser
    beam, the pylon arcs, the freed energy balls and the swooping
-   flyers, plus menu option 3 (start from a chosen zone).
+   flyers, plus menu options 3 (start from a chosen zone) and 4
+   (the palette's colour order).
 
 The gameplay scripts run the game an exact number of *game* frames
 through the emulator's `runrel` command and freeze the back buffer
@@ -184,10 +185,10 @@ BUF = 0o115000
 CELLS = 0o145000
 
 # The firmware boot menu wants "1" then ENTER; the game's own title
-# screen is started with "1" as well (K_ONE), and "2" toggles infinite
-# lives.
+# screen is started with "1" as well (K_ONE); "2" toggles infinite
+# lives and "4" the palette's colour order.
 K_RIGHT, K_DOWN, K_UP, K_FIRE, K_GREN = 133, 134, 154, 107, 166
-K_ONE, K_TWO, K_PAUSE = 0o30, 0o31, 0o6
+K_ONE, K_TWO, K_FOUR, K_PAUSE = 0o30, 0o31, 0o13, 0o6
 
 BOOT = f"""run 900
 press 030
@@ -880,10 +881,10 @@ def firepower(tmpdir, v):
 
 def menu(tmpdir):
     """The title screen: "1" starts, "2" turns infinite lives on and it
-    holds through a death."""
+    holds through a death, "4" swaps the palette's colour order."""
     td = Path(tmpdir)
     A_LIVES, A_CHEAT, A_ZONE = sym("LIVES"), sym("CHEAT"), sym("ZONE")
-    A_PDEAD = sym("PDEAD")
+    A_PDEAD, A_PALORD, A_ROWPALS = sym("PDEAD"), sym("PALORD"), sym("ROWPALS")
     title = ("run 900\npress 030\nrun 30\npress 153\nrun 500\n")
 
     # "1" alone gets into a game
@@ -915,6 +916,22 @@ def menu(tmpdir):
                  f"peekcpu {A_ZONE:o}\n", td)
     check("3 starts the game from the picked zone", zs[0] == 3,
           f"zone {zs[0]}")
+
+    # "4" swaps red and green in the palette nibble and it holds into
+    # the game: the HUD row's first slot is cyan, 0o13 in RGB order and
+    # 0o15 in GRB, in the high byte of the row's first palette word
+    A_HUDPAL = A_ROWPALS + 22 * 4
+    po = emu_raw(title + f"peekcpu {A_HUDPAL:o}\n"
+                 f"press {K_FOUR:o}\nrun 20\n"
+                 f"peekcpu {A_PALORD:o}\npeekcpu {A_HUDPAL:o}\n"
+                 f"press {K_ONE:o}\nrun 80\n"
+                 f"peekcpu {A_PALORD:o}\npeekcpu {A_HUDPAL:o}\n", td)
+    check("4 switches the palette from RGB to GRB",
+          po[0] >> 8 == 0o13 and po[1] == 1 and po[2] >> 8 == 0o15,
+          f"cyan {po[0] >> 8:o} -> {po[2] >> 8:o}, order {po[1]}")
+    check("and the game keeps the order the menu chose",
+          po[3] == 1 and po[4] >> 8 == 0o15,
+          f"order {po[3]}, cyan {po[4] >> 8:o}")
 
 
 K_3 = 0o32

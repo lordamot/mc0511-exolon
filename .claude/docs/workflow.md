@@ -27,7 +27,10 @@ one - the emulator understands:
 
 Scancodes: 133 right, 116 left, 154 up, 134 down, 107 ФИКС (fire),
 166 numpad ВВОД (grenade), 153 ENTER, 006 АП2, 004 СТОП, 030 the
-firmware menu's "1".
+firmware menu's "1"; the title screen's own options are 030 031 032
+013 ("1".."4" - note that "4" is 013, not the 033 the sequence
+suggests, and that it shares its release code with right / ENTER /
+space).
 
 A session always starts with the firmware loader:
 

@@ -35,7 +35,9 @@ ROWINK:		.BLKB	16.	; ink -> slot map while a row is converted
 ROWCNT:		.BLKW	16.	; ink pixel weights for the current row
 ROWPAL3:	.BLKB	4	; the three inks chosen for the row
 WHITESL:	.BLKB	24.	; per row: the slot whose ink is nearest white
-		.EVEN
+PALORD:		.BLKW	1	; palette colour order: 0 = RGB, 1 = GRB
+ROWINKS:	.BLKB	3*24.	; per row: the three inks its palette shows,
+		.EVEN		; kept so PAL_SETORD can re-encode them
 ROWW3:		.BLKW	3	; pixel weight of each chosen ink
 ROWWTOT:	.BLKW	1	; total lit pixels in the row
 		.EVEN

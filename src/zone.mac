@@ -4,9 +4,17 @@
 ; cell row, expand the cell buffer into the back buffer and show it.
 ; ------------------------------------------------------------------
 
-; ZX ink 0..15 -> UKNC palette nibble (Y*8 + R*4 + G*2 + B).
+; ZX ink 0..15 -> UKNC palette nibble.  Machines and emulators
+; disagree about the order of the nibble's colour bits, so both are
+; built in and menu option 4 picks between them: RGB is Y*8 + R*4 +
+; G*2 + B, GRB is Y*8 + G*4 + R*2 + B - and since a ZX ink is itself
+; bright / green / red / blue, GRB is the identity map.
 INKNIB:		.BYTE	0,1,4,5,2,3,6,7
 		.BYTE	10,11,14,15,12,13,16,17
+INKNIBG:	.BYTE	0,1,2,3,4,5,6,7
+		.BYTE	10,11,12,13,14,15,16,17
+PALTABS:	.WORD	INKNIB,INKNIBG	; indexed by PALORD (0 = RGB, 1 = GRB)
+PALNIB:		.WORD	INKNIB		; the table PALORD selects
 ; population count of 0..7, doubled (the colour-distance metric)
 POPC3:		.BYTE	0,2,2,4,2,4,4,6
 		.EVEN
@@ -406,25 +414,62 @@ ROW_ONE:	MOV	R5,ROWTMP
 		RETURN
 
 ; ------------------------------------------------------------------
-; Write the palette element of row R0 from ROWPAL3.  Pixel value 2 is
-; slot 1 (word 1, nibble 2), value 4 is slot 2 (word 2, nibble 0) and
-; value 6 is slot 3 (word 2, nibble 2); value 0 stays black.
-ROW_PALWORDS:	ASL	R0
+; Write the palette element of row R0 from ROWPAL3, and keep the row's
+; three inks in ROWINKS so a change of palette order can rebuild the
+; element without reloading anything.  Clobbers R1..R3.
+ROW_PALWORDS:	MOV	R0,R1
+		ASL	R1
+		ADD	R0,R1		; row * 3
+		ADD	#ROWINKS,R1
+		MOVB	ROWPAL3,(R1)+
+		MOVB	ROWPAL3+1,(R1)+
+		MOVB	ROWPAL3+2,@R1
+		; and on into PAL_ROW, which returns to our caller
+
+; Build the palette element of row R0 out of ROWINKS through the
+; nibble table PALNIB points at.  Pixel value 2 is slot 1 (word 1,
+; nibble 2), value 4 is slot 2 (word 2, nibble 0) and value 6 is slot
+; 3 (word 2, nibble 2); value 0 stays black.
+PAL_ROW:	MOV	R0,R1
+		ASL	R1
+		ADD	R0,R1		; row * 3 -> the row's three inks
+		ADD	#ROWINKS,R1
 		ASL	R0
-		MOVB	ROWPAL3,R1
-		MOVB	INKNIB(R1),R2
+		ASL	R0		; row * 4 -> its two palette words
+		MOVB	(R1)+,R2
+		ADD	PALNIB,R2
+		MOVB	@R2,R2
 		BIC	#177400,R2
 		SWAB	R2
 		MOV	R2,ROWPALS(R0)
-		MOVB	ROWPAL3+1,R1
-		MOVB	INKNIB(R1),R2
+		MOVB	(R1)+,R2
+		ADD	PALNIB,R2
+		MOVB	@R2,R2
 		BIC	#177400,R2
-		MOVB	ROWPAL3+2,R1
-		MOVB	INKNIB(R1),R3
+		MOVB	@R1,R3
+		ADD	PALNIB,R3
+		MOVB	@R3,R3
 		BIC	#177400,R3
 		SWAB	R3
 		BIS	R3,R2
 		MOV	R2,ROWPALS+2(R0)
+		RETURN
+
+; ------------------------------------------------------------------
+; Apply the palette order in PALORD: rebuild all 24 palette elements
+; from the inks their rows kept and hand them to the PPU.  Clobbers
+; R0..R4.
+PAL_SETORD:	MOV	PALORD,R0
+		ASL	R0
+		MOV	PALTABS(R0),PALNIB
+		CLR	R4
+1$:		MOV	R4,R0
+		CALL	PAL_ROW
+		INC	R4
+		CMP	R4,#NROWS
+		BLO	1$
+		MOV	#2,R0		; COMMAND_2: reload all 24 elements
+		CALL	SEND_PP_COMM
 		RETURN
 
 ; Sprites want white.  If the row's third ink is only a detail colour

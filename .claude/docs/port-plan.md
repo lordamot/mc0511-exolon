@@ -70,7 +70,8 @@ phase accumulator whose carry flips the speaker, so three square waves
 are XORed onto one bit.
 
 Keyboard (PPU): arrows = left/right/jump/duck, ФИКС or space = fire,
-numpad ВВОД = grenade, ENTER = menu select, АП2 = pause, СТОП = quit.
+numpad ВВОД = grenade, ENTER = menu select, АП2 = pause, СТОП = quit,
+'1'..'4' = the title screen's options.
 
 ## The game engine
 
@@ -106,7 +107,8 @@ Ported subsystem by subsystem from the RE:
   same 8x8 font as the original.
 - **flow** - death animation and respawn, lives, game over, the zone
   counter, and the title screen, which starts a game on "1" as the
-  original's does and adds infinite lives on "2".
+  original's does and adds infinite lives on "2", a starting zone on
+  "3" and the palette's colour order on "4".
 
 ## Resources (all editable text under src/res/)
 
@@ -177,6 +179,8 @@ player, `make shot` / `make demo` drive the headless emulator, and
     player lifted out of a mismatched entry floor after a zone load
     (`PL_SNAP`), and menu option 3 starting a later zone at the very
     left edge [DONE]
+14. menu option 4: the palette's colour order, RGB or GRB, switched on
+    the title screen and kept for the whole session [DONE]
 
 Everything in the original is now ported.
 
@@ -259,6 +263,20 @@ Everything in the original is now ported.
   back buffer, cell buffer, variables and stack - has to fit under
   that, which is why PROG_SIZE is 0115000 and the stack top 0160000
   (the first push predecrements to 0157776).
+- **The palette nibble's colour bits have two orders in the wild.**
+  A palette element stores an ink as bright + three colour bits, and
+  machines and emulators disagree about whether those three read
+  R/G/B or G/R/B; on the wrong one the sky is magenta and the grass
+  red.  `INKNIB` and `INKNIBG` hold both ZX-ink-to-nibble maps (GRB is
+  the identity, a ZX ink being bright/green/red/blue already) and
+  `PALNIB` points at the one `PALORD` selects.  Everything that colours
+  a row goes through `ROW_PALWORDS`, which now also records the row's
+  three inks in `ROWINKS`, so `PAL_SETORD` can re-encode all 24
+  palette elements from those and resend them with COMMAND_2 - which
+  is what menu option 4 does, recolouring the title screen as the key
+  is pressed.  The key itself is '4', scancode 013, and it took bit 9
+  of the key word off the player-2 right arrow this game has not got.
+
 - **The row palette is the whole colour pipeline.**  `ROW_ONE` weighs
   each ink in a row by the pixels its tiles light, keeps the three
   heaviest and snaps the rest to the nearest survivor (bitwise RGB

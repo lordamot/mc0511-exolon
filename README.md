@@ -42,6 +42,7 @@ numbered options and one more:
 | 1 | start the game |
 | 2 | infinite lives on / off |
 | 3 | start from a chosen zone - pick it with ↑ / ↓ while the option is on |
+| 4 | the palette's colour order - RGB or GRB |
 
 and in play:
 
@@ -195,6 +196,15 @@ original (compare `make demo` with `tools/zone_render.py 0 out.png`),
 and where the Spectrum had to spend both of a cell's colours the port
 does not.
 
+A palette element holds each ink as a nibble, and machines and
+emulators do not agree on the order of that nibble's colour bits: some
+read it as bright / red / green / blue, others as bright / green / red
+/ blue, and on the wrong one the sky comes up magenta and the grass
+red.  Both orders are built in and the title screen's fourth option
+picks between them, live - the whole screen recolours as you press the
+key, so you can simply keep the one that looks right, and the choice
+holds into the game and every zone after it.
+
 Sprites are drawn in the slot whose ink is nearest white, and every
 playfield row hands its third slot - the least used of the three - to
 white, so Vitorc is white wherever he can walk or jump.  Without that
@@ -237,7 +247,7 @@ carried an AY score that the 48K one never played, and
 | `uknc_control.py` | drive the headless UKNC emulator (boot, keys, screenshots, memory dumps, audio capture) |
 | `zx_control.py` | drive ZEsarUX on the original tape (keys, screenshots, memory dumps) |
 | `tap_extract.py` `z80dis.py` `z80_disasm.py` `z80_trace.py` `zx_view.py` | the ZX side: tape blocks, disassembly, code/data tracing, graphics viewing |
-| `verify_build.py` | the checks behind `make verify`, scripted runs of the title screen and of gameplay included (the menu's two options, facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, wall guns, mine missiles, the lingering-player rocket, and what each gun can and cannot shoot down) |
+| `verify_build.py` | the checks behind `make verify`, scripted runs of the title screen and of gameplay included (the menu's options, facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, wall guns, mine missiles, the lingering-player rocket, and what each gun can and cannot shoot down) |
 | `build_toolchain.py` | rebuild `bin/` from source |
 
 Resources are the source of truth.  Edit `src/res/zones/zones.txt`

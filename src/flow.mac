@@ -460,6 +460,12 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		MOV	#S_ZONEOPT,R3
 		CALL	PRINT_STR
 		CALL	MENU_ZOPT
+		MOV	#PS_ROW,R0	; option 4: which order the palette nibble
+		MOV	#6,R1		; puts its colour bits in
+		MOV	#3,R2
+		MOV	#S_PALOPT,R3
+		CALL	PRINT_STR
+		CALL	MENU_PAL
 		MOV	#14.,R0
 		MOV	#10.,R1
 		MOV	#2,R2
@@ -504,7 +510,14 @@ MENU:		MOV	#124.,ZONE	; the last zone doubles as a backdrop
 		BGE	63$
 		MOV	#124.,ZSEL
 63$:		CALL	MENU_ZSHOW
-7$:		MOV	#K_1,R0		; '1' starts, as the menu says
+7$:		MOV	#K_4,R0		; '4' swaps the palette's colour order,
+		CALL	KEY_EDGE	; live - the screen recolours as you watch
+		BEQ	8$
+		MOV	#1,R0
+		XOR	R0,PALORD
+		CALL	PAL_SETORD
+		CALL	MENU_PSHOW
+8$:		MOV	#K_1,R0		; '1' starts, as the menu says
 		CALL	KEY_EDGE
 		BEQ	2$
 		CLR	SND_MODE
@@ -519,6 +532,8 @@ CH_ROW	= 11.
 CH_COL	= 23.
 ZS_ROW	= 12.
 ZS_COL	= 24.
+PS_ROW	= 13.
+PS_COL	= 23.
 
 ZSELON:		.WORD	0	; option 3 armed
 ZSEL:		.WORD	0	; the zone a game will then start in
@@ -592,6 +607,32 @@ MENU_ZOPT:	MOV	#ZS_COL,MENUC	; blank the three cells first
 		DEC	MENUC
 		CMP	MENUC,#ZS_COL
 		BGE	3$
+		RETURN
+
+; ------------------------------------------------------------------
+; Option 4's state cells.  RGB and GRB are the same length, so there
+; is nothing to blank first.
+MENU_PAL:	MOV	#S_RGB,R3
+		TST	PALORD
+		BEQ	1$
+		MOV	#S_GRB,R3
+1$:		MOV	#PS_ROW,R0
+		MOV	#PS_COL,R1
+		MOV	#2,R2
+		CALL	PRINT_STR
+		RETURN
+
+MENU_PSHOW:	CALL	MENU_PAL
+		MOV	#PS_ROW,R0
+		MOV	#PS_COL,R1
+		MOV	#3,R2
+		MOV	#1,R3
+		CALL	CELL_RECT
+		MOV	#PS_ROW,R0
+		MOV	#PS_COL,R1
+		MOV	#3,R2
+		MOV	#1,R3
+		CALL	BLIT_RECT
 		RETURN
 
 MENU_ZSHOW:	CALL	MENU_ZOPT

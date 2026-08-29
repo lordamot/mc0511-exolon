@@ -574,11 +574,12 @@ KEY_OFF:	BIC	(R2)+,R1
 PP_KEYS_STATE:	.WORD	0
 
 ; key word bits: 0 up, 1 right, 2 down, 3 left, 4 ENTER, 5 FIKS
-; (P1 fire); 8..11 = same arrows for player 2, 13 = aux ENTER (P2
-; fire); 7 AP2, 15 STOP (pause)
+; (P1 fire); 8, 10 and 11 = up, down and left again for a player 2
+; this game has not got, 9 = '4', 13 = aux ENTER (P2 fire); 7 AP2,
+; 15 STOP (pause)
 KEYON_CODES:	.WORD	4,100000	; STOP
 		.WORD	154,400+1	; UP
-		.WORD	133,2*400+2	; RIGHT
+		.WORD	133,2		; RIGHT (bit 9 went to '4' below)
 		.WORD	134,4*400+4	; DOWN
 		.WORD	116,10*400+10	; LEFT
 		.WORD	153,20		; ENTER
@@ -589,11 +590,13 @@ KEYON_CODES:	.WORD	4,100000	; STOP
 		.WORD	30,100		; '1' - menu: start
 		.WORD	31,10000	; '2' - menu: toggle infinite lives
 		.WORD	32,40000	; '3' - menu: pick the starting zone
+		.WORD	13,1000		; '4' - menu: the palette's colour order
 		.WORD	0,0
 
 KEYOFF_CODES:	.WORD	4,100000	; STOP
 		.WORD	14,4*400+405	; UP+DOWN
-		.WORD	13,2*400+62	; RIGHT+ENTER+space
+		.WORD	13,2*400+62	; RIGHT+ENTER+space, and '4' - which
+					; releases with the same low nibble
 		.WORD	16,10*400+10	; LEFT
 		.WORD	7,40		; FIKS
 		.WORD	6,40*400+200+40	; AP2 + aux ENTER
