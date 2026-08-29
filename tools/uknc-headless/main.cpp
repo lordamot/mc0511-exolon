@@ -1,6 +1,6 @@
 /*  uknc-headless -- command-line UKNC (Elektronika MS 0511) emulator runner
     built on the emubase core of UKNCBTL (https://github.com/nzeemin/ukncbtl-qt,
-    LGPL v3).  Made for automated build-and-test of the OpenIT MC0511 project:
+    LGPL v3).  Made for automated build-and-test of the Exolon MC0511 project:
     boots a raw .dsk image, runs frames, injects keyboard scancodes, takes
     BMP screenshots and reads emulated memory -- all scriptable from stdin
     or a script file, no display required.
