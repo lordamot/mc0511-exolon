@@ -213,20 +213,20 @@ MU_STEP:	TST	(R5)
 		DEC	(R5)
 		BNE	9$
 1$:		MOV	6(R5),R1		; stream pointer
-		MOVB	(R1),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R1),R0
 		CMP	R0,#377
 		BNE	2$
 		MOV	10(R5),R1		; end of stream: start again
-		MOVB	(R1),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R1),R0
 		CMP	R0,#377
 		BEQ	8$
 2$:		ASL	R0
 		ADD	MU_PBASE,R0
 		MOV	(R0),2(R5)		; phase increment (0 = rest)
-		MOVB	1(R1),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	1(R1),R0
 		MOV	R0,(R5)			; frames
 		ADD	#2,R1
 		MOV	R1,6(R5)
@@ -470,20 +470,20 @@ AY_STEP:	TST	(R5)
 		DEC	(R5)
 		BNE	9$
 1$:		MOV	4(R5),R1		; stream pointer
-		MOVB	(R1),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R1),R0
 		CMP	R0,#377
 		BNE	2$
 		MOV	6(R5),R1		; end of stream: start again
-		MOVB	(R1),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R1),R0
 		CMP	R0,#377
 		BEQ	8$
 2$:		ASL	R0
 		ADD	AY_PBASE,R0
 		MOV	(R0),2(R5)		; AY period (0 = rest)
-		MOVB	1(R1),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	1(R1),R0
 		MOV	R0,(R5)			; frames
 		ADD	#2,R1
 		MOV	R1,4(R5)

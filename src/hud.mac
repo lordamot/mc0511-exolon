@@ -98,8 +98,8 @@ HUD_VALUES:	MOV	AMMO,R4		; ammo, two digits
 		MOV	#1,R2
 		MOV	#SCORE,R3
 		MOV	#6,R5
-1$:		MOVB	(R3)+,R4
-		BIC	#177400,R4
+1$:		CLR	R4
+		BISB	(R3)+,R4
 		MOV	R0,-(SP)
 		MOV	R1,-(SP)
 		MOV	R2,-(SP)

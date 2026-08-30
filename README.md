@@ -269,6 +269,7 @@ emulator.
 | `zx_control.py` | drive ZEsarUX on the original tape (keys, screenshots, memory dumps) |
 | `tap_extract.py` `z80dis.py` `z80_disasm.py` `z80_trace.py` `zx_view.py` | the ZX side: tape blocks, disassembly, code/data tracing, graphics viewing |
 | `verify_build.py` | the checks behind `make verify`, scripted runs of the title screen and of gameplay included (the menu's options, facing, the grenade's arc, the emplacement recoil, the teleport shower, energy balls, wall guns, mine missiles, the lingering-player rocket, and what each gun can and cannot shoot down) |
+| `bench.py` | game frames a second per zone in the headless emulator, one build or two side by side |
 | `build_toolchain.py` | rebuild `bin/` from source |
 
 Resources are the source of truth.  Edit `src/res/zones/zones.txt`

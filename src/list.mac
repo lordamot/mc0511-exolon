@@ -13,8 +13,8 @@
 
 ; ------------------------------------------------------------------
 ; Run the display list at R4.  Clobbers R0..R5.
-LIST_RUN:	MOVB	(R4)+,R0
-		BIC	#177400,R0
+LIST_RUN:	CLR	R0
+		BISB	(R4)+,R0
 		CMP	R0,#141		; 0..0140: draw a tile
 		BHIS	20$
 		ADD	LBASE,R0
@@ -25,8 +25,8 @@ LIST_RUN:	MOVB	(R4)+,R0
 		BHIS	30$
 		SUB	#170,R0
 		ADD	R0,LROW
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R4)+,R0
 		ADD	R0,LCOL
 		JMP	L_WRAP
 
@@ -46,18 +46,18 @@ LIST_RUN:	MOVB	(R4)+,R0
 
 50$:		CMP	R0,#337		; 0337: absolute cursor
 		BNE	60$
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R4)+,R0
 		MOV	R0,LROW
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R4)+,R0
 		MOV	R0,LCOL
 		JMP	LIST_RUN
 
 60$:		CMP	R0,#340		; 0340: full ZX attribute byte
 		BNE	70$
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R4)+,R0
 		MOV	R0,R1
 		BIC	#177770,R1	; ink bits
 		BIT	#100,R0		; bright
@@ -69,8 +69,8 @@ LIST_RUN:	MOVB	(R4)+,R0
 
 70$:		CMP	R0,#341		; 0341: start of a repeated block
 		BNE	80$
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R4)+,R0
 		MOV	LSTKP,R1
 		MOV	R0,LSTK(R1)
 		MOV	R4,LSTK+2(R1)
@@ -90,10 +90,10 @@ LIST_RUN:	MOVB	(R4)+,R0
 
 90$:		CMP	R0,#343		; 0343: call a sub-list
 		BNE	100$
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
-		MOVB	(R4)+,R1
-		BIC	#177400,R1
+		CLR	R0
+		BISB	(R4)+,R0
+		CLR	R1
+		BISB	(R4)+,R1
 		SWAB	R1
 		BIS	R1,R0
 		ADD	#LISTS,R0
@@ -119,10 +119,10 @@ LIST_RUN:	MOVB	(R4)+,R0
 
 100$:		CMP	R0,#344		; 0344: horizontal run
 		BNE	110$
-		MOVB	(R4)+,R5
-		BIC	#177400,R5
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R5
+		BISB	(R4)+,R5
+		CLR	R0
+		BISB	(R4)+,R0
 		ADD	LBASE,R0
 		TST	R5
 		BNE	101$
@@ -137,10 +137,10 @@ LIST_RUN:	MOVB	(R4)+,R0
 
 110$:		CMP	R0,#345		; 0345: vertical run
 		BNE	120$
-		MOVB	(R4)+,R5
-		BIC	#177400,R5
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R5
+		BISB	(R4)+,R5
+		CLR	R0
+		BISB	(R4)+,R0
 		ADD	LBASE,R0
 		TST	R5
 		BNE	111$
@@ -159,10 +159,10 @@ LIST_RUN:	MOVB	(R4)+,R0
 
 120$:		CMP	R0,#346		; 0346: set the tile base
 		BNE	130$
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
-		MOVB	(R4)+,R1
-		BIC	#177400,R1
+		CLR	R0
+		BISB	(R4)+,R0
+		CLR	R1
+		BISB	(R4)+,R1
 		SWAB	R1
 		BIS	R1,R0
 		MOV	R0,LBASE
@@ -170,8 +170,8 @@ LIST_RUN:	MOVB	(R4)+,R0
 
 130$:		CMP	R0,#350		; 0350: collision class
 		BNE	140$
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R4)+,R0
 		MOV	R0,LSOLID
 		JMP	LIST_RUN
 
@@ -185,8 +185,8 @@ LIST_RUN:	MOVB	(R4)+,R0
 		JMP	LIST_RUN
 155$:		CMP	R0,#353		; 0353: runtime animation hook - file
 		BNE	160$		; the cursor cell under class n (the
-		MOVB	(R4)+,R0	; original's opcode EB, resolved by
-		BIC	#177400,R0	; the class scan at 0x8E86)
+		CLR	R0		; original's opcode EB, resolved by
+		BISB	(R4)+,R0	; the class scan at 0x8E86)
 		TST	LERASE		; replaying a list in erase mode must
 		BNE	151$		; not file anything
 		CMP	HOOKN,#NHOOK

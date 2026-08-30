@@ -10,7 +10,8 @@ Seven groups of checks:
    compared, cell by cell, with the original ZX Spectrum game rendered
    straight out of EXOLON.TAP.  All 125 zones must match exactly.
 2. generator determinism - every *_gen.py produces byte-identical
-   output when run twice.
+   output when run twice, and no byte load in src/ is still written as
+   a sign-extending MOVB with the top half masked off afterwards.
 3. image layout - the program fits its budget and the disk image has
    the boot signature.
 4. sprite and music sanity - frame counts and the tune's shape.
@@ -123,6 +124,39 @@ def gen_deterministic():
         if r.returncode != 0:
             return f"sprites_gen.py failed: {r.stderr.strip()}"
     return None
+
+
+def masked_byte_loads():
+    """Byte loads written `MOVB x,Rn` + `BIC #177400,Rn`.
+
+    MOVB into a register sign-extends, so a byte load has to clear the
+    top half again; `CLR Rn` + `BISB x,Rn` does it in one word less and
+    one operand fetch less, because the mask is not an operand at all.
+    Only a load whose own address indexes off the register it lands in
+    (`MOVB TAB(R0),R0`) has to keep the mask - clearing R0 first would
+    throw the index away."""
+    bic = re.compile(r"^\s*BIC\s+#177400,\s*(\S+)\s*$")
+    movb = re.compile(r"^(?:[A-Z0-9_$.]+:)?\s*MOVB\s+(\S+),\s*(\S+)$")
+    out = []
+    for f in sorted((ROOT / "src").glob("*.mac")):
+        lines = [l.split(";", 1)[0].rstrip() for l in
+                 f.read_text().splitlines()]
+        code = [(i, l) for i, l in enumerate(lines) if l.strip()]
+        for n, (i, l) in enumerate(code):
+            m = bic.match(l)
+            if not m or n == 0:
+                continue
+            # the load itself, and a Z-test between the two is allowed
+            j, prev = code[n - 1]
+            if re.match(r"^\s*(BEQ|BNE)\s", prev) and n > 1:
+                j, prev = code[n - 2]
+            pm = movb.match(prev.strip())
+            if not pm or pm.group(2) != m.group(1):
+                continue
+            if re.search(r"\b" + re.escape(m.group(1)) + r"\b", pm.group(1)):
+                continue
+            out.append(f"{f.name}:{j + 1}")
+    return out
 
 
 def smoke(dsk, out_png):
@@ -249,15 +283,29 @@ def gf_runs(body):
     *game* frames however long the emulated machine takes over them.
     Zone loads stall the game for a dozen ticks and a busy zone drops
     to half rate with the screen skipping frames, so wall-clock ticks
-    stopped being a unit the gameplay tests can count in."""
+    stopped being a unit the gameplay tests can count in.
+
+    `press KEY N` goes the same way - it is the emulator's own command,
+    which holds the key for N *hardware* frames, so the number of game
+    frames a press covers would otherwise move with how fast the game
+    runs.  A bare `press KEY` (the pause key, which stops the frame
+    counter) is left alone, and so is `tick N`, the raw wall-clock
+    unit the frozen-screen dumps need."""
     bench = sym("BENCHF")
     out = []
     for line in body.splitlines():
+        tok = line.split()
         if line.startswith("run "):
-            n = int(line.split()[1])
+            n = int(tok[1])
             out.append(f"runrel {bench:o} {n} {n * 8 + 800}")
+        elif line.startswith("press ") and len(tok) >= 3:
+            n = int(tok[2])
+            out.append(f"keydown {tok[1]}")
+            out.append(f"runrel {bench:o} {n} {n * 8 + 800}")
+            out.append(f"keyup {tok[1]}")
+            out.append(f"runrel {bench:o} 3 824")
         elif line.startswith("tick "):
-            out.append("run " + line.split()[1])
+            out.append("run " + tok[1])
         else:
             out.append(line)
     return "\n".join(out) + "\n"
@@ -422,14 +470,19 @@ def gameplay(tmpdir):
           f"x {pads[5]}")
     r0, c0, r1, c1 = pads[1], pads[2], pads[3], pads[4]
     tpe = td / "tpents.bin"
+    # Up is the jump key as well, so a few frames after the warp the
+    # still-held key lifts him off the far pad again: his position is
+    # taken from the frame he lands on it, which is found by watching
+    # every frame of the press rather than by counting frames.
+    step = f"run 1\npeekcpu {A_PX:o}\npeekcpu {A_PY:o}\n"
     tp = emu(z2 + f"{poke16(A_PX, max(c0 * 4 - 3, 0))}"
              f"{poke16(A_PY, (r0 + 1) * 8)}run 2\n"
-             f"press {K_UP} 3\nrun 2\n"
-             f"dumpcpu {A_ENTS:o} {ENTBYTES} {tpe}\n"
-             f"run 4\npeekcpu {A_PX:o}\npeekcpu {A_PY:o}\n", td)
+             f"press {K_UP} 3\n" + step * 2
+             + f"dumpcpu {A_ENTS:o} {ENTBYTES} {tpe}\n" + step * 4, td)
+    track = [(tp[i], tp[i + 1]) for i in range(0, len(tp), 2)]
+    want = (max(c1 * 4 - 3, 0), (r1 + 1) * 8)
     check("pressing up warps him to the other pad",
-          tp[0] == max(c1 * 4 - 3, 0) and tp[1] == (r1 + 1) * 8,
-          f"({tp[0]}, {tp[1]}) want ({max(c1 * 4 - 3, 0)}, {(r1 + 1) * 8})")
+          any(p == want for p in track), f"{track} want {want}")
     e = ents(tpe.read_bytes())
     emitters = [x for x in e if x[0] == EK_TPFX]
     sparks = [x for x in e if x[0] == EK_SPARK]
@@ -866,7 +919,11 @@ def firepower(tmpdir, v):
             + f"{poke16(A_PX, 20)}{poke16(A_PY, 112)}"
             f"{poke16(A_PSUIT, suit)}{poke16(A_AMMO, 50)}run 2\n"
             f"dumpcpu {BUF:o} 12288 {bg}\n"
-            f"press {K_FIRE} 4\nrun 2\npress {K_PAUSE:o}\ntick 6\n"
+            # short press, frozen early: a bolt lives twelve frames and
+            # the pause key is one of the few things still counted in
+            # wall-clock ticks, so the dash is looked at well inside
+            # its life rather than on the frame it expires
+            f"press {K_FIRE} 2\nrun 1\npress {K_PAUSE:o}\ntick 6\n"
             f"dumpcpu {A_ENTS:o} {ENTBYTES} {ef}\n"
             f"dumpcpu {BUF:o} 12288 {bf}\n", td)
         n = 0
@@ -1229,6 +1286,9 @@ def main():
     print("generators")
     err = gen_deterministic()
     check("every generator is deterministic", err is None, err or "")
+    masked = masked_byte_loads()
+    check("no byte load pays for a BIC mask", not masked,
+          ", ".join(masked[:6]) + (" ..." if len(masked) > 6 else ""))
 
     print("image")
     check("disk image exists", dsk.exists(), str(dsk))

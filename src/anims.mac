@@ -52,8 +52,8 @@ ANIMS_INIT:	CLR	NFLM
 11$:		MOV	R4,R0
 		MOV	R3,R1
 		CALL	CELLADDR
-		MOVB	C.SOLID(R2),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	C.SOLID(R2),R0
 		CMP	R0,#CL_ANIM2
 		BNE	12$
 		CMP	NFLM,#NFLAME
@@ -69,14 +69,14 @@ ANIMS_INIT:	CLR	NFLM
 		MOV	NCYC,R2		; extend the last run when this cell
 		BEQ	121$		; continues it (the scan goes left to
 		DEC	R2		; right along each row)
-		MOVB	CYCROW(R2),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	CYCROW(R2),R0
 		CMP	R0,R4
 		BNE	121$
-		MOVB	CYCCOL(R2),R0
-		BIC	#177400,R0
-		MOVB	CYCLEN(R2),R1
-		BIC	#177400,R1
+		CLR	R0
+		BISB	CYCCOL(R2),R0
+		CLR	R1
+		BISB	CYCLEN(R2),R1
 		ADD	R1,R0
 		CMP	R0,R3
 		BNE	121$
@@ -118,12 +118,12 @@ ANIMS_INIT:	CLR	NFLM
 		MOV	HOOKN,R5		; the hook cells
 		BEQ	30$
 		MOV	#HOOKS,R4
-20$:		MOVB	(R4)+,R0		; class
-		BIC	#177400,R0
-		MOVB	(R4)+,R1		; row
-		BIC	#177400,R1
-		MOVB	(R4)+,R2		; col
-		BIC	#177400,R2
+20$:		CLR	R0
+		BISB	(R4)+,R0		; class
+		CLR	R1
+		BISB	(R4)+,R1		; row
+		CLR	R2
+		BISB	(R4)+,R2		; col
 		CMP	R1,#PLAYROWS		; off-screen anchors drop, as
 		BHIS	29$			; the plotter drops their cells
 		CMP	R2,#NCOLS
@@ -177,19 +177,19 @@ ANIMS_INIT:	CLR	NFLM
 		BNE	20$
 
 30$:		MOV	#FLYCFG,R1		; this zone's flyers, if any
-31$:		MOVB	(R1)+,R0
-		BIC	#177400,R0
+31$:		CLR	R0
+		BISB	(R1)+,R0
 		CMP	R0,#377
 		BEQ	39$
 		CMP	R0,ZONE
 		BEQ	32$
 		ADD	#2,R1
 		BR	31$
-32$:		MOVB	(R1)+,R0		; frames between spawns
-		BIC	#177400,R0
+32$:		CLR	R0
+		BISB	(R1)+,R0		; frames between spawns
 		MOV	R0,FLYCDV
-		MOVB	(R1)+,R0		; frame set * 8 + path id
-		BIC	#177400,R0
+		CLR	R0
+		BISB	(R1)+,R0		; frame set * 8 + path id
 		MOV	R0,R1
 		BIC	#177770,R1		; path id
 		ASL	R1
@@ -291,12 +291,12 @@ CYC_UPD:	TST	NCYC
 		CLR	CYCPH
 1$:		CLR	CYCI
 2$:		MOV	CYCI,R3
-		MOVB	CYCROW(R3),R0
-		BIC	#177400,R0
-		MOVB	CYCCOL(R3),R1
-		BIC	#177400,R1
-		MOVB	CYCLEN(R3),R5
-		BIC	#177400,R5
+		CLR	R0
+		BISB	CYCROW(R3),R0
+		CLR	R1
+		BISB	CYCCOL(R3),R1
+		CLR	R5
+		BISB	CYCLEN(R3),R5
 		MOV	R0,-(SP)
 		MOV	R1,-(SP)
 		MOV	R5,-(SP)
@@ -336,8 +336,8 @@ MINES_UPD:	TST	NMIN5
 		BEQ	5$			; blown: burn
 		TST	PDEAD
 		BNE	8$
-		MOVB	MINROW(R2),R0		; armed: underfoot?
-		BIC	#177400,R0
+		CLR	R0
+		BISB	MINROW(R2),R0		; armed: underfoot?
 		ASL	R0
 		ASL	R0
 		ASL	R0
@@ -345,8 +345,8 @@ MINES_UPD:	TST	NMIN5
 		ADD	#PL_H,R1		; feet on the mine's top line
 		CMP	R1,R0
 		BNE	8$
-		MOVB	MINCOL(R2),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	MINCOL(R2),R0
 		ASL	R0
 		ASL	R0
 		MOV	PX,R1
@@ -357,8 +357,8 @@ MINES_UPD:	TST	NMIN5
 		BGT	8$
 		CLRB	MINST(R2)		; it goes off
 		MOV	#SFX_BOOM,SND_REQ
-		MOVB	MINCOL(R2),R1
-		BIC	#177400,R1
+		CLR	R1
+		BISB	MINCOL(R2),R1
 		ASL	R1
 		ASL	R1
 		SUB	#2,R1
@@ -381,10 +381,10 @@ MINES_UPD:	TST	NMIN5
 		BIC	#177776,R5
 		ASL	R5
 		ADD	#MBLINK_T,R5
-		MOVB	MINROW(R2),R4
-		BIC	#177400,R4
-		MOVB	MINCOL(R2),R3
-		BIC	#177400,R3
+		CLR	R4
+		BISB	MINROW(R2),R4
+		CLR	R3
+		BISB	MINCOL(R2),R3
 		CALL	FLM_CELL		; over both of its cells
 		INC	R3
 		INC	R5
@@ -487,8 +487,8 @@ BOLT_BEAM:	TST	BEAMON
 		ASL	R0
 		ASL	R0
 		SUB	#4,R0
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
+		CLR	R1
+		BISB	E.X(R5),R1
 		CMP	R1,R0
 		BNE	9$
 		INC	BEAMHIT
@@ -540,11 +540,11 @@ EN_ARC:		CALL	RANDOM
 		BIC	#177774,R0
 		ADD	#ARC_FR,R0
 		MOV	R0,ARCF
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
+		CLR	R1
+		BISB	E.X(R5),R1
 		MOV	R1,ARCX
-		MOVB	E.Y(R5),R2
-		BIC	#177400,R2
+		CLR	R2
+		BISB	E.Y(R5),R2
 		MOV	R2,ARCY
 		MOV	#16.,SPRH
 		CLR	SPRC
@@ -576,17 +576,17 @@ PUMPS_ERASE:	TST	NPUMPS
 		BEQ	9$
 		CLR	PMPI
 1$:		MOV	PMPI,R2
-		MOVB	PMPCUR(R2),R0
-		BIC	#177400,R0
-		MOVB	PMPROW(R2),R3
-		BIC	#177400,R3
+		CLR	R0
+		BISB	PMPCUR(R2),R0
+		CLR	R3
+		BISB	PMPROW(R2),R3
 		SUB	R0,R3		; rows above the ground line
 		BLE	2$		; at rest: nothing was drawn
 		CMP	R3,#4
 		BLOS	11$
 		MOV	#4,R3
-11$:		MOVB	PMPCOL(R2),R1
-		BIC	#177400,R1
+11$:		CLR	R1
+		BISB	PMPCOL(R2),R1
 		MOV	#3,R2
 		CALL	MARK_RECT
 		TST	R4
@@ -601,8 +601,8 @@ PUMPS_UPD:	TST	NPUMPS
 		BEQ	9$
 		CLR	PMPI
 1$:		MOV	PMPI,R2
-		MOVB	PMPCNT(R2),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	PMPCNT(R2),R0
 		INC	R0
 		MOVB	R0,PMPCNT(R2)
 		CMP	R0,#PUMP_LO
@@ -625,10 +625,10 @@ PUMPS_UPD:	TST	NPUMPS
 		BR	5$
 4$:		CALL	PUMP_TOUCH		; fatal while it cycles
 5$:		MOV	PMPI,R2
-		MOVB	PMPCUR(R2),R0
-		BIC	#177400,R0
-		MOVB	PMPROW(R2),R3
-		BIC	#177400,R3
+		CLR	R0
+		BISB	PMPCUR(R2),R0
+		CLR	R3
+		BISB	PMPROW(R2),R3
 		SUB	R0,R3			; rows above the ground line
 		BLE	8$			; at rest it is fully sunk
 		CMP	R3,#4
@@ -644,18 +644,18 @@ PUMPS_UPD:	TST	NPUMPS
 		ASL	R0
 		MOV	R0,R2
 		MOV	PMPI,R0
-		MOVB	PMPCOL(R0),R1
-		BIC	#177400,R1
+		CLR	R1
+		BISB	PMPCOL(R0),R1
 		ASL	R1
 		ASL	R1
 		CLR	SPRMIR
 		MOV	#PUMP_FR,R0
 		CALL	SPR_PLAYERH
 		MOV	PMPI,R2
-		MOVB	PMPCUR(R2),R0
-		BIC	#177400,R0
-		MOVB	PMPCOL(R2),R1
-		BIC	#177400,R1
+		CLR	R0
+		BISB	PMPCUR(R2),R0
+		CLR	R1
+		BISB	PMPCOL(R2),R1
 		MOV	#3,R2
 		MOV	(SP)+,R3
 		CALL	MARK_RECT
@@ -668,8 +668,8 @@ PUMPS_UPD:	TST	NPUMPS
 PUMP_TOUCH:	TST	PDEAD
 		BNE	9$
 		MOV	PMPI,R2
-		MOVB	PMPCOL(R2),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	PMPCOL(R2),R0
 		ASL	R0
 		ASL	R0			; pump x0
 		MOV	PX,R1
@@ -679,8 +679,8 @@ PUMP_TOUCH:	TST	PDEAD
 		ADD	#11.,R0			; pump x1
 		CMP	PX,R0
 		BGT	9$
-		MOVB	PMPCUR(R2),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	PMPCUR(R2),R0
 		ASL	R0
 		ASL	R0
 		ASL	R0			; pump y0
@@ -757,13 +757,13 @@ FLY_ERASE:	TST	FLYON
 		BEQ	2$
 		MOV	R4,-(SP)
 		MOV	R5,-(SP)
-		MOVB	F.Y(R5),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.Y(R5),R0
 		ASR	R0
 		ASR	R0
 		ASR	R0
-		MOVB	F.X(R5),R1
-		BIC	#177400,R1
+		CLR	R1
+		BISB	F.X(R5),R1
 		ASR	R1
 		ASR	R1
 		MOV	#3,R2
@@ -789,15 +789,15 @@ FLY_UPD:	TST	FLYON
 		TSTB	F.ST(R3)
 		BEQ	8$
 		CALL	FLY_STEP		; -> R1 = dx, R2 = dy
-		MOVB	F.X(R3),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.X(R3),R0
 		ADD	R1,R0
 		BLT	7$			; off either side
 		CMP	R0,#128.
 		BHIS	7$
 		MOVB	R0,F.X(R3)
-		MOVB	F.Y(R3),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.Y(R3),R0
 		ADD	R2,R0
 		BLT	7$			; off the top or the ground
 		CMP	R0,#176.
@@ -810,23 +810,23 @@ FLY_UPD:	TST	FLYON
 		MOVB	F.PH(R3),R0		; four-frame animation
 		BIC	#177774,R0
 		ADD	FLYFRB,R0
-		MOVB	F.X(R3),R1
-		BIC	#177400,R1
-		MOVB	F.Y(R3),R2
-		BIC	#177400,R2
+		CLR	R1
+		BISB	F.X(R3),R1
+		CLR	R2
+		BISB	F.Y(R3),R2
 		MOV	R3,-(SP)
 		MOV	#16.,SPRH
 		CLR	SPRC
 		CLR	SPRMIR
 		CALL	SPR_SMALL
 		MOV	(SP)+,R3
-		MOVB	F.Y(R3),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.Y(R3),R0
 		ASR	R0
 		ASR	R0
 		ASR	R0
-		MOVB	F.X(R3),R1
-		BIC	#177400,R1
+		CLR	R1
+		BISB	F.X(R3),R1
 		ASR	R1
 		ASR	R1
 		MOV	#3,R2
@@ -856,8 +856,8 @@ FLY_STEP:	TSTB	F.REP(R3)
 		BR	2$
 3$:		CMPB	(R0),#P_REP
 		BNE	4$
-		MOVB	1(R0),R2
-		BIC	#177400,R2
+		CLR	R2
+		BISB	1(R0),R2
 		SUB	#2,R2			; the original applies the
 		BGE	31$			; pair n times in all
 		CLR	R2
@@ -876,8 +876,8 @@ FLY_STEP:	TSTB	F.REP(R3)
 ; its middle (0xA5F4).  Preserves R3.
 FLY_HITPL:	TST	PDEAD
 		BNE	9$
-		MOVB	F.X(R3),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.X(R3),R0
 		ADD	#2,R0			; box x0
 		MOV	PX,R1
 		ADD	#10.,R1
@@ -888,8 +888,8 @@ FLY_HITPL:	TST	PDEAD
 		INC	R1
 		CMP	R0,R1			; box x1 >= player x0
 		BLT	9$
-		MOVB	F.Y(R3),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.Y(R3),R0
 		ADD	#4,R0			; box y0
 		MOV	PY,R1
 		ADD	#PL_FOOT,R1
@@ -911,10 +911,10 @@ FLY_HITPL:	TST	PDEAD
 
 ; the flyer at R3 explodes: its cells are put back and an explosion
 ; entity takes over.  Clobbers everything but leaves R3's slot free.
-FLY_BOOM:	MOVB	F.X(R3),R1
-		BIC	#177400,R1
-		MOVB	F.Y(R3),R2
-		BIC	#177400,R2
+FLY_BOOM:	CLR	R1
+		BISB	F.X(R3),R1
+		CLR	R2
+		BISB	F.Y(R3),R2
 		CLRB	F.ST(R3)
 		MOV	#EK_BOOM,R0
 		CLR	R4
@@ -927,37 +927,37 @@ FLY_BOOM:	MOVB	F.X(R3),R1
 ; the caller scores.  Leaves R5 = ECUR.
 FLY_HITBOLT:	TST	FLYON
 		BEQ	8$
-		MOVB	E.X(R5),R1
-		BIC	#177400,R1
-		MOVB	E.Y(R5),R2
-		BIC	#177400,R2
+		CLR	R1
+		BISB	E.X(R5),R1
+		CLR	R2
+		BISB	E.Y(R5),R2
 		MOV	#FLYS,R3
 		MOV	#NFLY,R4
 1$:		TSTB	F.ST(R3)
 		BEQ	2$
-		MOVB	F.X(R3),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.X(R3),R0
 		SUB	#BVS_MX,R0		; the same sideways slack a
 		CMP	R1,R0			; bolt gets against a shot
 		BLT	2$
 		ADD	#8.+2*BVS_MX-1,R0
 		CMP	R1,R0
 		BGT	2$
-		MOVB	F.Y(R3),R0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.Y(R3),R0
 		CMP	R2,R0
 		BLT	2$
 		ADD	#15.,R0
 		CMP	R2,R0
 		BGT	2$
 		MOV	R3,-(SP)		; hit: put its patch back and
-		MOVB	F.Y(R3),R0		; blow it up
-		BIC	#177400,R0
+		CLR	R0
+		BISB	F.Y(R3),R0		; blow it up
 		ASR	R0
 		ASR	R0
 		ASR	R0
-		MOVB	F.X(R3),R1
-		BIC	#177400,R1
+		CLR	R1
+		BISB	F.X(R3),R1
 		ASR	R1
 		ASR	R1
 		MOV	#3,R2

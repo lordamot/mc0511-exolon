@@ -277,6 +277,25 @@ Everything in the original is now ported.
   resets; the headless emulator's `runrel` command runs until it has
   advanced N, which is what the gameplay tests count in.
 
+- **A byte load costs a word less without the mask.**  `MOVB` into a
+  register sign-extends, so the port's byte loads used to read
+  `MOVB x,Rn` + `BIC #177400,Rn` - and that `#177400` is an operand
+  word the CPU fetches every time round.  Every byte instruction *but*
+  `MOVB` writes only the low half of a register, so `CLR Rn` +
+  `BISB x,Rn` lands the same zero-extended byte in three words instead
+  of four and 21 CPU ticks sooner (`CLR Rn` is 11 against the immediate
+  `BIC`'s 32; the load itself costs the same either way).  It sets N
+  from bit 7 rather than clearing it, which nothing branched on, and
+  leaves Z and C exactly as before, so the routines that return a flag
+  through `RETURN` still do.  181 of the 205 sites converted; the ones
+  left are those whose own address indexes off the register the byte
+  lands in (`MOVB TAB(R0),R0` - clearing R0 first would throw the index
+  away) and the dozen `BIC #177400` that mask a wrapped counter rather
+  than a load.  The saving is 364 bytes of image and, measured in the
+  headless emulator over the busy zones, about 6 500 CPU ticks a frame
+  out of ~285 000, worth around 3% of the frame rate; `tools/bench.py`
+  is the sweep that says so.
+
 - **Where the RAM ends.**  The UKNC CPU only has RAM below 0160000;
   0160000..0177777 is the I/O page in user mode.  Everything - program,
   back buffer, cell buffer, variables and stack - has to fit under

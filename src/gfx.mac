@@ -86,8 +86,8 @@ CELL_DRAW:	MOV	R0,-(SP)
 ; record, R3 = its top line in the back buffer.  Clobbers everything.
 ; CELL_RECT walks both pointers itself, because the shifts CELLADDR and
 ; BUFADDR need cost as much again as expanding the cell does.
-CELL_ONE:	MOVB	C.SLOT(R2),R0
-		BIC	#177400,R0
+CELL_ONE:	CLR	R0
+		BISB	C.SLOT(R2),R0
 		MOV	@R2,R5		; tile index
 		ASL	R5
 		ASL	R5
@@ -104,21 +104,21 @@ CD_CLR:		CLR	(R3)		; empty cell
 		ADD	#BUF_ROW,R3
 		SOB	R2,CD_CLR
 		BR	CD_END
-CD_P1:		MOVB	(R5)+,R1	; plane 1 only
-		BIC	#177400,R1
+CD_P1:		CLR	R1
+		BISB	(R5)+,R1	; plane 1 only
 		MOV	R1,(R3)
 		ADD	#BUF_ROW,R3
 		SOB	R2,CD_P1
 		BR	CD_END
-CD_P2:		MOVB	(R5)+,R1	; plane 2 only
-		BIC	#177400,R1
+CD_P2:		CLR	R1
+		BISB	(R5)+,R1	; plane 2 only
 		SWAB	R1
 		MOV	R1,(R3)
 		ADD	#BUF_ROW,R3
 		SOB	R2,CD_P2
 		BR	CD_END
-CD_P3:		MOVB	(R5)+,R1	; both planes, through the same
-		BIC	#177400,R1	; table the sprite loop uses
+CD_P3:		CLR	R1		; both planes, through the same
+		BISB	(R5)+,R1	; table the sprite loop uses
 		ASL	R1
 		MOV	DUPTAB(R1),(R3)
 		ADD	#BUF_ROW,R3
@@ -375,17 +375,17 @@ SPR_LINE:	CMP	R3,#BUF
 		BLO	SPR_SKIP
 		CMP	R3,#BUF_END
 		BHIS	SPR_DONE
-		MOVB	(R4)+,R0
-		BIC	#177400,R0
-		MOVB	(R4)+,R1
-		BIC	#177400,R1
+		CLR	R0
+		BISB	(R4)+,R0
+		CLR	R1
+		BISB	(R4)+,R1
 		SWAB	R1
 		BIS	R1,R0		; R0 = source bytes 0 and 1
 		CLR	R1
 		CMP	TMPA,#3
 		BNE	1$
-		MOVB	(R4)+,R1	; R1 = source byte 2
-		BIC	#177400,R1
+		BISB	(R4)+,R1	; R1 = source byte 2 (still zero
+					; from the CLR above)
 1$:		TST	R0		; a blank line costs nothing more
 		BNE	11$		; than these tests (explosion and
 		TST	R1		; spark frames are half empty)
@@ -490,8 +490,8 @@ SPR_FLIP:	MOV	R0,R2
 		CLR	R1
 		RETURN
 1$:		SWAB	R2		; 24: byte 1 stays in the middle
-		MOVB	REVTAB(R1),R0	; byte 2 -> the new byte 0
-		BIC	#177400,R0
+		CLR	R0
+		BISB	REVTAB(R1),R0	; byte 2 -> the new byte 0
 		BIS	R2,R0
 		MOV	SPRB0,R1	; byte 0 -> the new byte 2
 		RETURN
@@ -544,9 +544,9 @@ PIX_DRAW:	TST	DRAWOFF
 ; ------------------------------------------------------------------
 ; Text into the cell buffer: R3 = 0-terminated string (tile codes),
 ; R0 = cell row, R1 = cell column, R2 = ink slot.
-PRINT_STR:	MOVB	(R3)+,R4
+PRINT_STR:	CLR	R4
+		BISB	(R3)+,R4
 		BEQ	9$
-		BIC	#177400,R4
 		MOV	R3,-(SP)
 		MOV	R2,-(SP)
 		MOV	R1,-(SP)
